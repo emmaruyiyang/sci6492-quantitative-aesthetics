@@ -30,6 +30,9 @@ const TILE = 128;
 const TILE_BY_LEVEL = [288, 512, 128];
 const COLS = 4;
 const ROWS = 3;
+// The river level samples this atlas directly (P8), so the grid is public.
+export const IMP_COLS = COLS;
+export const IMP_ROWS = ROWS;
 export const VARIANTS = COLS * ROWS;
 export function tileForLevel(i) { return TILE_BY_LEVEL[i] || TILE; }
 
@@ -154,6 +157,15 @@ export function bakeAtlas(renderer, material, buildVariant, extent = 1, tile = T
   const prevTarget = renderer.getRenderTarget();
   const uSize = material.uniforms.uSizeToPx.value;
   const uOpac = material.uniforms.uOpacity.value;
+  // A level whose marks reconstruct their texture coordinate from
+  // gl_FragCoord (the river's patches) needs to know the rectangle it is
+  // being drawn into, and in here that is one tile of the atlas, not the
+  // whole buffer.
+  const uVp = material.uniforms.uViewport;
+  const uVo = material.uniforms.uViewportOrigin;
+  const prevVp = uVp ? uVp.value.clone() : null;
+  const prevVo = uVo ? uVo.value.clone() : null;
+  if (uVp) uVp.value.set(TILE, TILE);
 
   // local [-1,1] maps to TILE pixels, so one local unit is TILE/2 px
   material.uniforms.uSizeToPx.value = TILE / (2 * extent);
@@ -191,6 +203,7 @@ export function bakeAtlas(renderer, material, buildVariant, extent = 1, tile = T
     rt.viewport.set(x, y, TILE, TILE);
     rt.scissor.set(x, y, TILE, TILE);
     rt.scissorTest = true;
+    if (uVo) uVo.value.set(x, y);
     renderer.setRenderTarget(rt);            // re-applies the rect above
     renderer.render(scene, cam);
 
@@ -201,6 +214,8 @@ export function bakeAtlas(renderer, material, buildVariant, extent = 1, tile = T
 
   material.uniforms.uSizeToPx.value = uSize;
   material.uniforms.uOpacity.value = uOpac;
+  if (uVp && prevVp) uVp.value.copy(prevVp);
+  if (uVo && prevVo) uVo.value.copy(prevVo);
   rt.scissorTest = false;
   rt.viewport.set(0, 0, rt.width, rt.height);
   renderer.setRenderTarget(prevTarget);

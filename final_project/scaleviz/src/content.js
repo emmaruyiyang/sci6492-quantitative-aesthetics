@@ -18,6 +18,9 @@
 import { hashStr, mulberry32, gaussian, makeNoise1D } from './rng.js';
 import { fields, sampleField, sampleColor, galaxyLocal, densityAt, galaxyUV } from './fields.js';
 import { cellTileCount, cellTileMeans } from './cells.js';
+// The river's brush is a baked cell chunk, so this level has to know how
+// many variants the atlas holds. Impostor.js imports nothing from here.
+import { VARIANTS as PATCH_VARIANTS } from './impostor.js';
 
 // P7 - the step between cell and river.
 //
@@ -387,6 +390,54 @@ const MARK_EXP = 0.45;
 // same enumeration - but every mid-zoom frame now shows what the water is
 // made of.
 export const RIVER_CELLS = true;
+
+// P8 - the river's brush is a CELL CHUNK, not a cell.
+//
+// Up to P7 a river-level mark was a photograph of one cell, 3.04 absolute
+// units across. A cell-level chunk is 2.28 units across and holds 2,400
+// cells of 0.03-0.12. So the two levels disagreed about how big a cell is by
+// 23-77x, and one river-level "cell" was larger than an entire cell chunk.
+// Crossing the hand-off, every mark you had been reading as a cell burst
+// into ~2,400 of them, in positions that had nothing to do with where the
+// mark had been. That is the jump: ink appearing in empty places and
+// vanishing from full ones.
+//
+// The fix is to make the mark BE the thing it is standing in for. A river
+// mark is now the same baked picture of a cell chunk that the cell level
+// uses for its own stand-ins, stamped at exactly the stations the cell level
+// will put its chunks at, at exactly their size, with exactly their tint. At
+// the hand-off nothing moves, nothing changes size and nothing changes
+// colour: a patch is replaced by its own 2,400 cells, in place.
+export const RIVER_PATCHES = true;
+
+// One cell chunk's content spans this much, in absolute units. This is the
+// sprite size a river-level mark gets, so that the sprite and the chunk that
+// replaces it cover the same ground.
+export const CELL_CHUNK_SPAN = 2 * LEVEL_EXTENT[0] * CELL_UNIT;
+
+// Station spacing on the lattice getCellOrigins lays down. Shared, because
+// the river level now has to predict that lattice without building it.
+const CELL_STATION_SP = 0.82;
+
+// How far a cell chunk's ink reaches from its station, in absolute units.
+// The chunk's content sits inside a unit DISC and its largest cells have a
+// radius of 0.06, so 1.06, against the 1.14 the tile is baked at.
+const PATCH_INK_R = 1.06;
+
+// Where a lattice row may sit, so the ink stops at the bank. A channel
+// narrower than one chunk cannot be drawn narrower than one chunk, so the
+// clamp at 0 is a real floor, not a guard.
+function latHalf(hw) { return Math.max(0, hw - PATCH_INK_R); }
+
+// Mean alpha of one baked cell-chunk tile. MEASURED by reading tile 0 of the
+// level-0 impostor atlas back off the GPU: 0.3927. It barely matters, and
+// that is worth saying - the lattice is uniform, so every node comes out at
+// coverage 3.0 (p10 2.95, p90 3.04 over 400 nodes) and the saturation term
+// is 0.95 for all of them. riverVis is therefore very nearly just channel
+// area, which is the honest statement of what a lattice of identical stamps
+// puts on screen.
+const PATCH_INK_FRAC = 0.393;
+const PATCH_INK_AREA = PATCH_INK_FRAC * CELL_CHUNK_SPAN * CELL_CHUNK_SPAN;
 const TAU = Math.PI * 2;
 
 // A cell is a cell. The sub-linear law below is right for a streak, which is
@@ -631,7 +682,45 @@ export function nodeHalfEdges(i) {
 // shading and its along-channel variation; only the hue moves.
 const RIVER_HUE_SWING = 1.15;   // radians, at the ends of the warm-cool axis
 
+// One mark per cell-chunk station. The hash is EXACTLY the one cascade.js
+// uses to pick a cell chunk's stand-in, so the sprite drawn here and the
+// stand-in drawn there are the same baked tile at the same angle.
+function buildRiverPatches(i) {
+  const g = getRiverGraph();
+  const { origins, count } = getCellOrigins(i);
+  const ox = g.pos[i * 3], oy = g.pos[i * 3 + 1], oz = g.pos[i * 3 + 2];
+  const n = Math.min(count, RIVER_POINT_CAP);
+  // Only pathological nodes reach the cap; when one does, thin the lattice
+  // evenly rather than truncating it, which would leave whole half-edges
+  // blank at this level and painted at the next one.
+  const stride = count > n ? count / n : 1;
+
+  const pos = new Float32Array(n * 3);
+  const size = new Float32Array(n);
+  const color = new Float32Array(n * 3);
+  const aux = new Float32Array(n);
+  const sz = CELL_CHUNK_SPAN / RIVER_UNIT;
+
+  for (let k = 0; k < n; k++) {
+    const j = stride === 1 ? k : Math.min(count - 1, Math.floor(k * stride));
+    pos[k * 3]     = (origins[j * 3] - ox) / RIVER_UNIT;
+    pos[k * 3 + 1] = (origins[j * 3 + 1] - oy) / RIVER_UNIT;
+    pos[k * 3 + 2] = (origins[j * 3 + 2] - oz) / RIVER_UNIT;
+    size[k] = sz;
+    const h = (i * 2654435761 ^ (j + 1) * 40503) >>> 0;
+    const v = h % PATCH_VARIANTS;
+    // v * 8 + orient, at most 95: exact in float32, same packing the
+    // impostor layer uses for its own variant/orient pair.
+    aux[k] = v * 8 + ((h >>> 7) % 8);
+    const t = cellImpostorTint(i, v);
+    color[k * 3] = t[0]; color[k * 3 + 1] = t[1]; color[k * 3 + 2] = t[2];
+  }
+  return { pos, size, color, aux };
+}
+
+
 function buildRiver(i) {
+  if (RIVER_PATCHES) return buildRiverPatches(i);
   const g = getRiverGraph();
   const sp = fields().river.spine;
   // One rotation for the whole chunk: the water here belongs to this part of
@@ -750,7 +839,7 @@ export function getCellOrigins(nodeId) {
   // photographed cells are 1.45x wider, so the lattice can be looser for
   // the same coverage - and it has to be: at 0.62 the chunks stacked 13 deep
   // and the deepest frame cost 14.3 ms of a 16.7 ms budget.
-  const SP = 0.82;
+  const SP = CELL_STATION_SP;
   for (const j of others) {
     const e = edgePath(nodeId, j);
     const fromLo = (e.lo === nodeId);
@@ -761,8 +850,14 @@ export function getCellOrigins(nodeId) {
     // needs ~3.6x oversampling before the Poisson holes close; a lattice
     // covers the channel evenly at the same count, which is what stops the
     // deep view looking moth-eaten.
+    // Stations carry a chunk 2.28 units across, so a lattice laid out to the
+    // channel's own half-width paints a band 2.28 wider than the channel.
+    // That read as fur along every bank - invisible while the river level
+    // drew its own thin marks, obvious from P8 on, when the river started
+    // drawing these very chunks. Inset the lattice by the chunk's ink radius
+    // so the INK lands on the bank, not the station.
     let along = Math.max(2, Math.round((e.len * 0.5) / SP));
-    let across = Math.max(1, Math.round(2 * hwMean / SP));
+    let across = Math.max(1, Math.round(2 * latHalf(hwMean) / SP));
     while (along * across > 14000 && along > 2) { along = Math.max(2, (along * 0.8) | 0); across = Math.max(1, (across * 0.8) | 0); }
 
     for (let ka = 0; ka < along; ka++) {
@@ -780,7 +875,7 @@ export function getCellOrigins(nodeId) {
       const hwHere = wA + (wM - wA) * t;
       const nx = -Math.sin(hd), ny = Math.cos(hd);
       for (let kl = 0; kl < across; kl++) {
-        const lat = ((kl + 0.5 + (rnd() - 0.5) * 1.0) / across - 0.5) * 2 * hwHere * 0.92;
+        const lat = ((kl + 0.5 + (rnd() - 0.5) * 1.0) / across - 0.5) * 2 * latHalf(hwHere);
         list.push([
           bx + nx * lat,
           by + ny * lat,
@@ -932,10 +1027,18 @@ function buildCell(node, id) {
     guard++;
     const x = rnd() * 2 - 1;
     const y = rnd() * 2 - 1;
-    // soft-edged square, not a disc: adjacent chunks have to blend into one
-    // continuous tissue rather than read as separate pills
-    const edge = 1 - Math.max(Math.abs(x), Math.abs(y));
-    if (rnd() > Math.min(1, edge * 3.2)) continue;
+    // A soft-edged DISC since P8. It was a soft square, on the argument that
+    // squares tile and discs read as separate pills - true of a lattice that
+    // only just covers, false of this one, which stacks 2.6 chunks deep. The
+    // square was axis-aligned in SCREEN space while a channel runs at
+    // whatever angle it likes, so every bank came out as a comb of square
+    // corners about a fifth of the channel wide. Invisible while this level
+    // was only ever seen from inside; obvious from P8 on, when the river
+    // level started drawing these same chunks from the outside.
+    // The disc keeps 78.5% of the square's ink, so the acceptance slope goes
+    // up to hold the coverage.
+    const edge = 1 - Math.hypot(x, y);
+    if (rnd() > Math.min(1, edge * 4.1)) continue;
     const gx = Math.min(G - 1, Math.floor((x + 1) * 0.5 * G));
     const gy = Math.min(G - 1, Math.floor((y + 1) * 0.5 * G));
     const gi = gy * G + gx;
@@ -1079,6 +1182,34 @@ export function riverVis(i) {
   if (v !== undefined) return v;
   const g = getRiverGraph();
   const sinu = fields().river.sinuosity || 1.0;
+
+  if (RIVER_PATCHES) {
+    // Every station stamps the SAME picture, so a node's visible ink is set
+    // by how many stations its channel holds and how much they overlap.
+    // The station count is computed the way getCellOrigins lays the lattice
+    // down, including its rounding - a one-cell-wide headwater gets a whole
+    // row of stations and so over-covers, and that is real, not noise.
+    let area = 0, n = 0;
+    for (const j of nodeHalfEdges(i)) {
+      const e = edgePath(i, j);
+      const hwMean = (g.hw[i] + (g.hw[i] + g.hw[j]) * 0.5) * 0.5;
+      let along = Math.max(2, Math.round((e.len * 0.5) / CELL_STATION_SP));
+      let across = Math.max(1, Math.round(2 * latHalf(hwMean) / CELL_STATION_SP));
+      while (along * across > 14000 && along > 2) {
+        along = Math.max(2, (along * 0.8) | 0);
+        across = Math.max(1, (across * 0.8) | 0);
+      }
+      n += along * across;
+      area += Math.max((e.len * 0.5) * 2 * hwMean, 1e-6);
+    }
+    if (n > RIVER_POINT_CAP) n = RIVER_POINT_CAP;
+    const foot = Math.max(area, n * CELL_STATION_SP * CELL_STATION_SP);
+    v = foot * (1 - Math.exp(-n * PATCH_INK_AREA / Math.max(foot, 1e-6)));
+    v /= RIVER_UNIT * RIVER_UNIT;
+    visCache.set(i, v);
+    return v;
+  }
+
   let total = 0, pts = 0;
   for (const j of nodeHalfEdges(i)) {
     const dx = g.pos[j * 3] - g.pos[i * 3], dy = g.pos[j * 3 + 1] - g.pos[i * 3 + 1];

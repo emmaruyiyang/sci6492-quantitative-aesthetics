@@ -2,6 +2,8 @@
 // them into samplers. Nothing here is procedural: every distribution in the
 // piece is read out of the two reference photographs.
 
+import { asset } from './assets.js';
+
 let F = null;
 
 function cdfFrom(map) {
@@ -51,23 +53,38 @@ export function sampleColor(u, v) {
   return [c.data[i] / 255, c.data[i + 1] / 255, c.data[i + 2] / 255];
 }
 
-async function bin(url) {
+// A field is normally its own .bin next to the page. The artifact build
+// (tools/make_artifact_build.mjs) folds the five of them into fields.json as
+// base64 instead, because that host serves .json but not .bin. Decoding it
+// here rather than handing out a data: URI keeps the load off fetch() and so
+// out of reach of whatever connect-src policy the host applies.
+function fromB64(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+async function bin(entry, base) {
+  if (entry.b64) return fromB64(entry.b64);
+  const url = asset(base, entry.file);
   const r = await fetch(url);
   if (!r.ok) throw new Error('missing field ' + url + ' (run tools/extract_fields.py)');
   return new Uint8Array(await r.arrayBuffer());
 }
 
 export async function loadFields(base = '/') {
-  const meta = await (await fetch(base + 'fields/fields.json')).json();
+  const meta = await (await fetch(asset(base, 'fields/fields.json'))).json();
   const g = meta.galaxy, r = meta.river;
 
   const [diffuse, stars, color, mask, dist, spine] = await Promise.all([
-    bin(base + g.diffuse.file),
-    bin(base + g.stars.file),
-    bin(base + g.color.file),
-    bin(base + r.mask.file),
-    bin(base + r.dist.file),
-    (await fetch(base + r.spine.file)).json(),
+    bin(g.diffuse, base),
+    bin(g.stars, base),
+    bin(g.color, base),
+    bin(r.mask, base),
+    bin(r.dist, base),
+    r.spine.data ? r.spine.data
+                 : (await fetch(asset(base, r.spine.file))).json(),
   ]);
 
   // The galaxy reference is 1:2, so the long axis spans the chunk's local

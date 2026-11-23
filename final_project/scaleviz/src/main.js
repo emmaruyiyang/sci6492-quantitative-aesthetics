@@ -287,6 +287,10 @@ function frame(now) {
   cascade.update(state.F, h, aspect, halfPxY);
   renderer.render(scene, camera);
 
+  // The boot notice stays up until something has actually been drawn, so a
+  // page that fails silently says so instead of showing its own background.
+  if (window.__bootOK) { window.__bootOK(); window.__bootOK = null; }
+
   if (fpsSamples.length < 100000) fpsSamples.push(inst);
   if (now > 3000 && inst < worstFps) worstFps = inst;
   updateHud(h);

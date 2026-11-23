@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>scaleviz P0</title>
+    <title>scaleviz</title>
     <style>
       html, body { margin:0; height:100%; background:#05060a; overflow:hidden; }
       canvas { display:block; }
@@ -56,6 +56,13 @@
         font:inherit; color:#9fb3c8; opacity:.55; white-space:nowrap;
       }
       #scalebar .tick:hover { opacity:1; color:#e6edf3; }
+      #boot {
+        position:fixed; inset:0; display:flex; align-items:center;
+        justify-content:center; z-index:50; padding:0 24px; text-align:center;
+        font:13px/1.7 ui-monospace, Menlo, monospace; color:#6b7d8f;
+        white-space:pre-wrap; pointer-events:none;
+      }
+      #boot.err { color:#d98b8b; }
       #scalebar .tick::before {
         content:''; position:absolute; left:50%; top:-5px; width:1px; height:3px;
         background:rgba(159,179,200,.45);
@@ -73,6 +80,30 @@
       </div>
       <div class="ticks" id="sbTicks"></div>
     </div>
+    <!-- A page whose assets fail to load is indistinguishable from the piece
+         itself: the background IS near-black. Say something instead. -->
+    <div id="boot">loading…</div>
+    <script>
+      (function () {
+        var box = document.getElementById('boot');
+        function fail(what) {
+          if (!box) return;
+          box.className = 'err';
+          box.textContent = 'scaleviz could not start.\n\n' + what +
+            '\n\nIt needs WebGL2 and loads ~4 MB of assets from the same ' +
+            'folder as this page.';
+        }
+        window.addEventListener('error', function (e) {
+          fail(e.message || String(e.error || 'script error'));
+        }, true);
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e.reason;
+          fail((r && (r.message || r)) || 'a load was rejected');
+        });
+        // the module clears this once it has a frame on screen
+        window.__bootOK = function () { if (box) box.remove(); box = null; };
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

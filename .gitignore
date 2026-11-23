@@ -37,6 +37,8 @@ final_project/sample/
 
 # ---- build output ----
 final_project/scaleviz/dist/
+final_project/scaleviz/dist-single/
+final_project/scaleviz/dist-artifact/
 
 # ---- machine-local config (hold absolute paths; *_example.json are the templates) ----
 .env

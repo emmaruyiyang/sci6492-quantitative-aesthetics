@@ -20,8 +20,9 @@
 import * as THREE from 'three';
 import { LEVELS, LEVEL_EXTENT, forEachChunk, chunkKey, buildChunk, variantData,
          cellImpostorTint, riverVariant, riverImpostorGain,
-         RIVER_CELLS } from './content.js';
-import { bakeAtlas, ImpostorLayer, VARIANTS, tileForLevel } from './impostor.js';
+         RIVER_CELLS, RIVER_PATCHES } from './content.js';
+import { bakeAtlas, ImpostorLayer, VARIANTS, tileForLevel,
+         IMP_COLS, IMP_ROWS } from './impostor.js';
 import { cellAtlas, cellMeta, cellNormals, cellMeanLum } from './cells.js';
 
 const VERT = /* glsl */`
@@ -34,10 +35,23 @@ const VERT = /* glsl */`
   varying float vAlpha;
   varying vec3 vTint;
   varying float vAux;
+#ifdef RIVER_PATCH
+  // A point sprite's gl_PointCoord has no usable screen-space derivative on
+  // this driver, so texture2D() against it samples mip 0 whatever the sprite
+  // size is. Baked at 288 px and drawn at 9, that is one random texel per
+  // pixel: the patch came out as fine speckle covering 25% more ground than
+  // the impostor quad standing in the same place, which filters correctly.
+  // Reconstructing the coordinate from gl_FragCoord gives the fragment a
+  // coordinate the hardware CAN differentiate, so the mip chain is used.
+  uniform vec2 uViewport;      // target rectangle size, device px
+  uniform vec2 uViewportOrigin;// its lower-left corner (non-zero in the bake)
+  varying vec2 vCtr;           // sprite centre, device px
+  varying float vPxSz;         // sprite size, device px
+#endif
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     float px = size * uSizeToPx;
-    #if MARK == 1 && !defined(RIVER_CELLS)
+    #if MARK == 1 && !defined(RIVER_CELLS) && !defined(RIVER_PATCH)
       px *= ELONG;            // the sprite has to hold the stretched streak
     #endif
     // Sub-pixel marks are clamped up and dimmed instead of drawn at 1px full
@@ -50,6 +64,11 @@ const VERT = /* glsl */`
     // growing buys nothing and costs everything: the galaxy's 78k glow
     // sprites reached 129px at u=3.7 and alone cost ~12 ms/frame.
     gl_PointSize = min(px, uMaxPx);
+#ifdef RIVER_PATCH
+    vCtr = uViewportOrigin +
+           (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uViewport;
+    vPxSz = gl_PointSize;
+#endif
     vAlpha = a;
     vTint = tint;
     vAux = aux;
@@ -65,6 +84,13 @@ const FRAG = /* glsl */`
   varying float vAlpha;
   varying vec3 vTint;
   varying float vAux;
+
+#ifdef RIVER_PATCH
+  uniform sampler2D uPatch;       // the level-0 impostor atlas
+  uniform vec2 uPatchTile;        // 1/COLS, 1/ROWS
+  varying vec2 vCtr;
+  varying float vPxSz;
+#endif
 
 #if defined(USE_CELL_TEX)
   uniform sampler2D uCells;
@@ -134,6 +160,48 @@ const FRAG = /* glsl */`
   #endif
 
     gl_FragColor = vec4(albedo * a, a);   // premultiplied
+    return;
+  #endif
+
+  #ifdef RIVER_PATCH
+    /* ---- river, drawn out of cell CHUNKS ----
+       Not a photograph of one cell: the baked picture of a whole cell chunk,
+       which is what the next level down actually puts here. The sprite is
+       stamped at the cell level's own station, at the cell chunk's own size,
+       with the same variant, the same orientation and the same tint the cell
+       level's stand-in would get. Crossing the hand-off, a patch is replaced
+       by its own 2,400 cells and nothing else changes - which is the whole
+       point of P8.
+
+       The tile is already premultiplied and already carries the cell level's
+       grade, so uTint is deliberately NOT applied here: a second grade on
+       top is exactly the kind of difference the hand-off must not have. */
+    float po = mod(vAux, 8.0);
+    float pv = floor((vAux - po) * 0.125 + 0.0001);
+    // gl_PointCoord's y runs DOWN and gl_FragCoord's runs UP, so flip to keep
+    // the orientation decode below identical to the impostor layer's.
+    vec2 pp = (gl_FragCoord.xy - vCtr) / max(vPxSz, 1e-3) + 0.5;
+    pp.y = 1.0 - pp.y;
+    if (po >= 4.0) pp.x = 1.0 - pp.x;
+    float pq = mod(po, 4.0);
+    vec2 pd = pp - 0.5;
+    if (pq == 1.0) pd = vec2(-pd.y, pd.x);
+    else if (pq == 2.0) pd = -pd;
+    else if (pq == 3.0) pd = vec2(pd.y, -pd.x);
+    pp = pd + 0.5;
+    float pcx = mod(pv, PATCH_COLS);
+    float pcy = floor(pv / PATCH_COLS);
+    vec4 pt = texture2D(uPatch, (vec2(pcx, pcy) + pp) * uPatchTile);
+    // A point sprite and the impostor layer's instanced quad do not put the
+    // same amount of the same tile on screen: measured over three places and
+    // three sizes (16-26 px), the sprite runs 1.05-1.12x brighter where both
+    // levels have ink, with no trend in size, so it is not the sprite-size
+    // rounding it first looked like. This is that offset, and it scales the
+    // premultiplied result - rgb AND coverage - because the error is in how
+    // much tile lands on screen, not in its grade.
+    float pk = vAlpha * uOpacity * PATCH_GAIN;
+    if (pt.a * pk < 0.003) discard;
+    gl_FragColor = vec4(pt.rgb * vTint, pt.a) * pk;
     return;
   #endif
 
@@ -239,11 +307,38 @@ const FRAG = /* glsl */`
 // the sprite count depends only on the zoom - so a long fade out spends a
 // full frame budget on something at 4% opacity. Measured: carrying the cell
 // level to u=2.30 cost 17.2 ms/frame while it was invisible.
-const FADE_IN  = [[-2.18, -1.90], [-2.30, -1.60], [-2.30, -1.60]];
+// P8 made this a SWITCH, not a fade. It used to run u = 2.18 -> 1.90: a
+// 1.23-decade overlap, there because the two levels disagreed about
+// everything and needed a long way to argue it out. They now render the same
+// frame to the pixel (measured: IoU 1.000, mean luminance ratio 0.999-1.001
+// over three places and three zooms), so there is nothing to blend - and
+// blending identical content is actively WRONG under source-over, because
+// two half-weight copies composite to less than one full-weight copy. Held
+// at 0.5/0.5 the frame measured 3.5% dark, a dip you could see.
+//
+// It is also not free: at u=2.15 the cell level was 3% opaque and still cost
+// 69,653 impostors, against the river level drawing the identical picture
+// out of cached geometry.
+//
+// An equal pair means a STEP at that value, not a ramp: at the hand-off
+// exactly one of the two levels is ever drawing.
+const FADE_IN  = [[-1.90, -1.90], [-2.30, -1.60], [-2.30, -1.60]];
 // Fading out slowly looked harmless until it was measured: a level at 3%
 // opacity still pays full fill-rate, and its marks grow as you zoom past it.
 // The galaxy alone cost 21 ms/frame at u=3.4 while being invisible.
-const FADE_OUT = [ 0.05,  0.55];
+// Per level since P8. A level used to fade out on its own schedule, which
+// left the cell level arriving at u=2.18-1.90 while the river level stayed
+// at full weight until u=0.95 - 1.23 decades of both levels drawing the same
+// ground at once. That overlap existed to HIDE the hand-off; with the river
+// drawing the cell level's own chunks there is nothing to hide, so the two
+// levels now cross over: level 1 reaches zero exactly where level 0 reaches
+// one. s(level 1) = 1.5 - u, so the switch at u = 1.90 is s = -0.40, and
+// FADE_IN[0] is the same point in its own s = -u.
+const FADE_OUT = [
+  [ 0.05,  0.55],      // cell
+  [-0.40, -0.40],      // river - the mirror of FADE_IN[0]
+  [ 0.05,  0.55],      // galaxy
+];
 
 
 
@@ -321,8 +416,12 @@ function smoothstep(a, b, x) {
 export function levelWeight(unit, H, level = 1) {
   const s = Math.log10(unit / H);
   const fi = FADE_IN[level];
-  return smoothstep(fi[0], fi[1], s) *
-         (1 - smoothstep(FADE_OUT[0], FADE_OUT[1], s));
+  const fo = FADE_OUT[level];
+  // A degenerate pair is a step, not a ramp. Blending two levels that draw
+  // the same picture is worse than switching between them (see FADE_IN).
+  const i = fi[0] >= fi[1] ? (s >= fi[0] ? 1 : 0) : smoothstep(fi[0], fi[1], s);
+  const o = fo[0] >= fo[1] ? (s >= fo[0] ? 1 : 0) : smoothstep(fo[0], fo[1], s);
+  return i * (1 - o);
 }
 
 export class ScaleCascade {
@@ -350,7 +449,11 @@ export class ScaleCascade {
     this.materials = LEVELS.map((L, i) => {
       // Levels 0 and 1 both draw out of the cell atlas now: the cell level
       // because a cell IS one, the river level because it is made of them.
-      const useCells = (i === 0 || (i === 1 && RIVER_CELLS)) && !!cellAtlas();
+      // Since P8 the river level draws cell CHUNKS, not cells, so it reads
+      // the level-0 impostor atlas instead of the cell atlas.
+      const patchRiver = i === 1 && RIVER_PATCHES && !!cellAtlas();
+      const useCells = (i === 0 || (i === 1 && RIVER_CELLS && !RIVER_PATCHES)) &&
+                       !!cellAtlas();
       const defines = { MARK: i, ELONG: '2.6', RCELL_FIT: '1.281', RCELL_OWN: '0.60' };
       const uniforms = {
         uTint:     { value: new THREE.Color(...LEVEL_TINT[i]) },
@@ -359,6 +462,16 @@ export class ScaleCascade {
         uMinPx:    { value: 1.25 },
         uMaxPx:    { value: 128 },
       };
+      if (patchRiver) {
+        defines.RIVER_PATCH = '';
+        defines.PATCH_COLS = IMP_COLS.toFixed(1);
+        defines.PATCH_GAIN = '1.0';
+        // filled in below, once the level-0 atlas has been baked
+        uniforms.uPatch = { value: null };
+        uniforms.uPatchTile = { value: new THREE.Vector2(1 / IMP_COLS, 1 / IMP_ROWS) };
+        uniforms.uViewport = { value: new THREE.Vector2(1, 1) };
+        uniforms.uViewportOrigin = { value: new THREE.Vector2(0, 0) };
+      }
       if (useCells) {
         defines.USE_CELL_TEX = '';
         defines.CELL_COLS = cm.cols.toFixed(1);
@@ -383,22 +496,32 @@ export class ScaleCascade {
         // Light adds; matter covers. The galaxy is light; the river stopped
         // being light the moment its marks became cells, because eleven
         // layers of matter composite to a sheet, not to something brighter.
-        ...(useCells ? PREMULT_BLEND : { blending: THREE.AdditiveBlending }),
+        ...(useCells || patchRiver ? PREMULT_BLEND
+                                   : { blending: THREE.AdditiveBlending }),
       });
     });
 
     // Bake once, at startup. Level 2 is a single chunk that is never far
     // enough away to need standing in for, so it has no atlas.
-    this.impostors = LEVELS.map((L, i) => {
-      if (i === 2) return null;
-      const premult = i === 0 || (i === 1 && RIVER_CELLS && !!cellAtlas());
+    // Order matters now: level 1's material SAMPLES level 0's atlas, so
+    // level 0 has to be baked before level 1's own bake renders anything.
+    this.impostors = [];
+    for (let i = 0; i < LEVELS.length; i++) {
+      if (i === 2) { this.impostors.push(null); continue; }
+      const premult = i === 0 ||
+                      (i === 1 && (RIVER_PATCHES || RIVER_CELLS) && !!cellAtlas());
+      if (i === 1 && this.materials[1].uniforms.uPatch) {
+        this.materials[1].uniforms.uPatch.value = this.impostors[0].atlas;
+      }
       const atlas = bakeAtlas(renderer, this.materials[i],
                               (v) => variantData(i, v, VARIANTS), LEVEL_EXTENT[i],
                               tileForLevel(i), premult);
       // The impostor has to blend the same way the thing it stands in for
       // does, or the level visibly changes character at the threshold.
-      return new ImpostorLayer(scene, atlas, IMPOSTOR_CAP, premult);
-    });
+      const layer = new ImpostorLayer(scene, atlas, IMPOSTOR_CAP, premult);
+      layer.atlas = atlas;
+      this.impostors.push(layer);
+    }
   }
 
   acquire(key, level, a, b, budgetLeft) {
@@ -468,6 +591,9 @@ export class ScaleCascade {
       mat.uniforms.uOpacity.value = w;
       mat.uniforms.uSizeToPx.value = (L.unit / H) * halfPxY;
       mat.uniforms.uMaxPx.value = MARK_MAX_LOCAL[li] * halfPxY;
+      if (mat.uniforms.uViewport) {
+        mat.uniforms.uViewport.value.set(halfPxY * 2 * aspect, halfPxY * 2);
+      }
       if (imp) imp.begin(w, halfPxY * 2 * aspect, halfPxY * 2);
 
       // __forceImpostor is a dev switch: it renders the identical frame

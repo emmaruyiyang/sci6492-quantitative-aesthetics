@@ -1,4 +1,4 @@
-# scaleviz — P0 + P1 + P2 + P3 + P4 + P5 + P6
+# scaleviz — P0 + P1 + P2 + P3 + P4 + P5 + P6 + P7 + P8
 
 Continuous zoom across ~4.5 decades: **cell → river → galaxy**.
 P0 built the scaffold: numerical stability and the LOD plumbing, the two
@@ -40,6 +40,56 @@ cursor-pinning behaviour. The level ticks sit where each level's cross-fade
 weight actually peaks (u = 0.93 / 2.27 / 3.55), not at even thirds: the
 steps are 10^1.5 and 10^2, so evenly spaced labels would misstate the
 hierarchy.
+
+## Publish
+
+```bash
+npm run build                      # -> dist/           3.8 MB zipped, 15 files
+node tools/make_single_html.mjs    # -> dist-single/scaleviz.html   5.58 MB
+```
+
+There is no server, no API and no database. The whole piece is a static page
+plus 3.9 MB of assets, and everything you actually see is generated at
+runtime from a seeded PRNG: 1,600 river nodes, 1,416,555 cell chunks and
+3.4 billion cell marks, none of which is stored.
+
+| what ships | |
+|---|---|
+| `cells/cell_atlas.png` 1280x1280, 100 tiles of 128 px | 2.5 MB |
+| `cells/cell_normal.png` | 1.1 MB |
+| the bundle, three.js included | 510 KB, **134 KB** gzipped |
+| `fields/` seven density fields + the river spine | 260 KB |
+
+`base` is `'./'`, so the folder build runs wherever it is mounted. Verified by
+serving `dist/` at a two-level subpath (`/myrepo/deep/`): every asset 200, no
+console errors, zero dropped chunks. Every runtime load goes through
+`asset()` in src/assets.js, which is also what makes the single-file build
+possible.
+
+The single file inlines each asset as a `data:` URI on
+`globalThis.__SCALEVIZ_INLINE__` and the bundle as an inline module, so it
+opens from `file://` with no server. Verified: **zero** network requests after
+the document itself. Base64 costs 4 bytes per 3, which is the whole of the
+3.9 MB -> 5.58 MB difference.
+
+Two things the packer has to get right, both found by it going wrong:
+
+- `String.replace` treats `$&`, `` $` `` and `$'` in a replacement STRING as
+  substitution patterns, and minified JS is full of them. The first attempt
+  spliced four copies of the original HTML into the middle of the bundle. Use
+  a replacer function.
+- A literal `</script` inside either payload closes the tag early.
+
+Requirements: WebGL2 and top-level `await` (`build.target: 'esnext'`), so
+Chrome 89+ / Safari 15+. Measured on a 375x812 phone viewport: 750x1624
+buffer, worst frame 1.3 ms, zero dropped. There is no pinch-to-zoom — on
+touch the scale bar IS the zoom control.
+
+**Before publishing anywhere public**, settle `cells/cell_atlas.png`. It
+carries 100 real 128 px photographic cut-outs, one from each of 100 distinct
+images out of the 4,000-image set in `../sample/topography` (the filenames
+are in `cells.json`'s `sources`). `fields/` is 192x384 statistics of the two
+reference photographs and is abstracted past recognition; the atlas is not.
 
 ## The one idea
 
@@ -765,12 +815,162 @@ Now 60% photograph. The galaxy→river colour chain survives the swap because
 the tissue palette is itself chosen by the galaxy's warmth: +0.85 for the
 palette against +0.88 for the water.
 
+## P8 — the hand-off is an identity
+
+P7 made the river's brush a cell. It did not make it *the* cell, and that is
+the difference between the two levels agreeing and the two levels merely
+looking similar.
+
+### Measured: the levels disagreed about how big a cell is, by 23–77×
+
+Built one chunk of each at a node of median drainage area (hw = 5.50
+absolute) and read the `size` arrays back:
+
+| | sprite diameter (absolute) | visible cell |
+|---|---|---|
+| river level | median 3.04, p90 3.82 | **2.15** |
+| cell level | median 0.031, p90 0.102 | **0.028 – 0.093** |
+
+A river-level mark (3.04) was **larger than an entire cell chunk** (2.28
+units, holding 2,400 cells). The same 11.0-unit channel read as 5.1 cells
+across at the river level and 118–390 at the cell level. So crossing the
+hand-off, every mark you had been reading as a cell burst into ~2,400 of
+them, on a lattice that had no relation to where the 409 random marks had
+been. Nothing was in the same place: ink appeared in empty ground and
+vanished from full ground. That is the jump.
+
+The naming hid it. `LEVELS[0].unit = 1` says "one cell diameter", but a
+level-0 chunk is 2.28 units and holds 2,400 cells of 0.03–0.12. Level 0 is a
+TISSUE level, 20–70 cells across per chunk.
+
+### Three suspects ruled out by measurement
+
+| suspect | measured | verdict |
+|---|---|---|
+| `RIVER_POINT_CAP` truncating whole half-edges | 13 of 1,600 nodes hit the cap; **5** of 3,094 half-edges end up blank | negligible |
+| impostor stand-ins pointing the wrong way | the river's impostor hand-off is at u=2.385, above the cell fade-in | not this jump (still true higher up) |
+| the two levels walking different networks | both call the same `nodeHalfEdges` and the same `edgePath` polyline | identical |
+
+The topology was never wrong. The scales were.
+
+### The fix: the mark IS the thing it stands in for
+
+A river-level mark is now the **baked picture of a cell chunk** — the same
+tile out of the level-0 impostor atlas that the cell level uses for its own
+stand-ins — stamped at the cell level's own stations (`getCellOrigins`), at
+the cell chunk's own size (2.28), with the same variant, the same
+orientation and the same tint. The hash is copied from cascade.js verbatim,
+so sprite and stand-in are the same picture at the same angle.
+
+Verified by rendering each level alone at full weight into the same frame
+and comparing pixel for pixel, over three places and three zooms:
+
+| | IoU of the ink masks | mean luminance ratio |
+|---|---|---|
+| before | 0.80 (best case) | 1.28 |
+| after | **1.000** | **0.999 – 1.001** |
+
+The two levels now render the same frame. Which means the hand-off is not a
+cross-fade problem any more; it is not a problem at all.
+
+### Two bugs found by the measurement, not by looking
+
+**The patches were 2.6× too big.** `px *= ELONG` is guarded by
+`#if MARK == 1 && !defined(RIVER_CELLS)` — and the patch path defines
+`RIVER_PATCH`, not `RIVER_CELLS`, so every patch got the streak stretch
+meant for P6's abstract mark. It cost a day of wrong theories: mip
+selection, blend factors, sampler state, the hash, the tint — all
+eliminated, all innocent. What found it was rendering ONE sprite from each
+path side by side at 10× and looking: the river's filled a 40 px crop that
+the impostor's half filled.
+
+Worth recording what the wrong theories cost, because two of them looked
+confirmed. A `PATCH_GAIN` calibration measured at 1.08 did nothing when
+applied — correctly, because with ~8 layers of source-over the interior is
+near-opaque and insensitive to per-sprite alpha; the ratio was never a
+brightness error. And an isolated single node measured **1.043 luminance
+with 1.728 ink**: same light, 73% more ground. That is the signature of a
+size error, and it was read as a filtering error for far too long.
+
+**The banks were furry.** Stations spread to ±0.92·hw and then each one
+carries a chunk 1.14 further, so the painted band was 2.28 wider than the
+channel — 13% on a median channel, 21% on a headwater. Invisible while the
+river drew its own thin marks; a fringe of hair along every bank once it
+drew these chunks. The lattice is now inset by the chunk's ink radius
+(`latHalf(hw) = max(0, hw − 1.06)`), so the INK lands on the bank rather
+than the station.
+
+### The chunk is a disc now, not a square
+
+`buildCell` accepted points inside a soft-edged SQUARE, on the argument that
+squares tile and discs read as separate pills. True of a lattice that only
+just covers; false of this one, which stacks 2.6 chunks deep. The square was
+axis-aligned in *screen* space while a channel runs at whatever angle it
+likes, so every bank came out as a comb of square corners. Measured on the
+baked tile: corner alpha went 0.39 → 0.00, tile mean alpha 0.393 → 0.369,
+with the acceptance slope raised 3.2 → 4.1 to hold the coverage.
+
+### A switch, not a fade
+
+The cross-fade used to run u = 2.18 → 1.90: 1.23 decades of both levels
+drawing the same ground, there to hide a hand-off that cannot be hidden.
+With the two frames identical there is nothing to hide — and blending them
+is actively **wrong**: two half-weight copies composite under source-over to
+less than one full-weight copy. Held at 0.5/0.5 the frame measured 3.5%
+dark, which is visible.
+
+It was also expensive. A level's opacity does not reduce its cost, and at
+u=2.15 the cell level was 3% opaque and still cost 69,653 impostors, against
+the river level drawing the identical picture out of cached geometry.
+
+So `FADE_IN` / `FADE_OUT` take a degenerate pair as a STEP, and level 0
+switches on at u=1.90 exactly where level 1 switches off. Across it:
+
+| u | 1.93 | 1.92 | 1.91 | **1.90** | 1.89 | 1.88 |
+|---|---|---|---|---|---|---|
+| level | river | river | river | **cell** | cell | cell |
+| mean luminance | 52.47 | 52.39 | 52.50 | **52.55** | 52.70 | 52.91 |
+
+The step at the switch is **+0.10%**, against a background trend of about
+0.3% per 0.01 of u. The largest step anywhere in u = 2.00 → 1.80 is 0.52%,
+and it is content, not a threshold.
+
+For comparison, the largest threshold step in P7 was −7%.
+
+### What it cost, and what it bought
+
+Worst frame over the whole range went 12.2 ms → **7.1 ms**, at u=1.90 just
+after the switch (22,556 cell impostors). Zero dropped chunks. Precision
+4.49e-12 px.
+
+The river level at u=2.1–2.3 is now the cheap one: 84,414 points in 100
+cached draws measured 0.1 ms, against 7.4 ms for the cell level drawing the
+identical picture by enumerating 69,653 stations per frame. That is why the
+switch sits at 1.90 rather than at 2.18 — as deep as the baked tile's
+resolution allows, which is anywhere above u≈1.2 (the tile is 288 px and the
+patch reaches 170 px at u=1.13, where full cell chunks take over anyway).
+
+### What it changed about the picture
+
+The river level now paints every channel at full tissue density, where
+before its marks were budgeted by channel area, so headwaters nearly
+vanished and only the trunks read. The drainage hierarchy is still there —
+it is in the channel WIDTH, 3.6 cells at a headwater against 26 at a trunk —
+but it is no longer also in brightness. At u≈2.3 the network reads as a bush
+of equal-weight twigs rather than a few bright worms.
+
+This is the honest picture: it is what the cell level has always drawn, and
+the whole point of P8 is that the two levels draw the same thing. Whether it
+is the picture the piece wants is a separate question, and the lever for it
+would be a per-node alpha on the patch, applied at BOTH levels so they stay
+identical.
+
 ## Levels
 
 | level | unit (absolute) | chunk | points/chunk |
 |---|---|---|---|
 | 2 galaxy | 10^3.5 ≈ 3162 | 1, sampled from the photograph | 100,000 |
-| 1 river | 10^1.5 ≈ 31.6 | one per graph node (1,600, all active), drawing its half-edges as cells | by coverage |
+| 1 river | 10^1.5 ≈ 31.6 | one per graph node (1,600, all active), drawing its half-edges as cell CHUNKS | one per station |
 | 0 cell | 1 | a jittered lattice tiling each node's channel | 2,400 |
 
 The two steps are not equal. Cell→river is 10^1.5 and river→galaxy is 100;
@@ -785,16 +985,22 @@ hangs over it.
 Chunks are generated on demand from a seeded PRNG (no stored dataset), cached
 LRU, and at most 6 are built per frame so fast zooms do not hitch.
 
-Levels cross-fade on `s = log10(unit / H)`: fade in over `[-2.3, -1.6]` (the
-cell level over `[-2.18, -1.90]`, see P7), fade out over `[0.05, 0.55]`, so
-adjacent levels overlap rather than popping. The fade-out used to run to
-0.85; a level at 3% opacity still pays full fill rate and its marks keep
-growing as you zoom past it, which cost 21 ms/frame around u=3.4 for a galaxy
-nobody could see.
+Levels cross-fade on `s = log10(unit / H)`: fade in over `[-2.3, -1.6]`,
+fade out over `[0.05, 0.55]`, so adjacent levels overlap rather than popping.
+The fade-out used to run to 0.85; a level at 3% opacity still pays full fill
+rate and its marks keep growing as you zoom past it, which cost 21 ms/frame
+around u=3.4 for a galaxy nobody could see.
+
+`FADE_IN` and `FADE_OUT` are both per level, and a degenerate pair means a
+STEP rather than a ramp. The cell/river boundary uses one: since P8 the two
+levels render the same frame to the pixel, so they switch at u=1.90 instead
+of blending, which is both cheaper and more correct (see P8).
 
 A level's opacity does not reduce its cost — the sprite count depends only on
-the zoom — so the cell level's fade-in tail is short on purpose. Carrying it
-to u=2.30 at 4% opacity cost 17.2 ms/frame for something invisible.
+the zoom. That used to argue for a short fade tail; since P8 it argues for no
+tail at all on the cell/river boundary. Carrying the cell level to u=2.30 at
+4% opacity cost 17.2 ms/frame for something invisible, and even its 3%-opaque
+arrival at u=2.15 cost 69,653 impostors.
 
 ## Measurements (2560×1720 buffer)
 

@@ -10,14 +10,15 @@
 // 100 tiles x 8 free orientations x per-point size and brightness jitter.
 
 import * as THREE from 'three';
+import { asset } from './assets.js';
 
 let ATLAS = null;
 let NORMALS = null;
 let META = null;
 
 export async function loadCellAtlas(base = '/') {
-  const meta = await fetch(base + 'cells/cells.json').then((r) => r.json());
-  const tex = await new THREE.TextureLoader().loadAsync(base + 'cells/cell_atlas.png');
+  const meta = await fetch(asset(base, 'cells/cells.json')).then((r) => r.json());
+  const tex = await new THREE.TextureLoader().loadAsync(asset(base, 'cells/cell_atlas.png'));
   // NOT tagged sRGB. These are raw ShaderMaterials with no
   // <colorspace_fragment>, so nothing re-encodes on the way out: tagging the
   // texture sRGB decodes it and never encodes it back, and the whole cell
@@ -36,7 +37,7 @@ export async function loadCellAtlas(base = '/') {
   // photographs. This one is DATA, not colour: no colour space, and it must
   // not be stretched or graded on the way in.
   if (meta.normals) {
-    const nrm = await new THREE.TextureLoader().loadAsync(base + 'cells/' + meta.normals);
+    const nrm = await new THREE.TextureLoader().loadAsync(asset(base, 'cells/' + meta.normals));
     nrm.colorSpace = THREE.NoColorSpace;
     nrm.minFilter = THREE.LinearMipmapLinearFilter;
     nrm.magFilter = THREE.LinearFilter;
