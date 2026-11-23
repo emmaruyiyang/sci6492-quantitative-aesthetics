@@ -1,0 +1,17 @@
+{
+  "model_type": "ranknet",
+  "version": "1.0",
+  "model_ids": [
+    "dino~dinov2_vitg14"
+  ],
+  "normalize": [
+    true
+  ],
+  "embed_dim": 1536,
+  "hidden_dim": 128,
+  "dropout": 0.3,
+  "trained_on": {
+    "dataset": "art_rng_abstract_2000_sample_200",
+    "ranking": "ranking_Alden_1.json"
+  }
+}

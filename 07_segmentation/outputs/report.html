@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>What the Censor Cannot See</title>
+<style>
+@page { size: letter; margin: 18mm 19mm 16mm; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { orphans: 2; widows: 2; font: 11pt/1.5 Calibri, "Helvetica Neue", Arial, sans-serif; color: #1a1a1a; margin: 0; }
+h1 { font: 700 23pt/1.15 Calibri, "Helvetica Neue", Arial, sans-serif; letter-spacing: -0.015em; margin: 0 0 3mm; }
+h2 { font: 700 11.6pt/1.3 Calibri, "Helvetica Neue", Arial, sans-serif; letter-spacing: .02em;
+     margin: 6mm 0 2mm; padding-bottom: 1.1mm; border-bottom: .5pt solid #c9c6c0; break-after: avoid; }
+h3 { font: 700 10.4pt/1.3 Calibri, "Helvetica Neue", Arial, sans-serif; margin: 5mm 0 1.6mm; break-after: avoid; }
+p { margin: 0 0 2.6mm; text-align: justify; hyphens: auto; }
+.byline { font: 9.6pt/1.45 Calibri, "Helvetica Neue", Arial, sans-serif; color: #6d6a65; margin: 0 0 4mm; }
+.abstract { font-size: 10.8pt; color: #2c2c2c; border-left: 1.6pt solid #1a1a1a; padding-left: 4mm; margin: 0 0 2mm; }
+.lead { margin-top: 0; }
+figure { margin: 3.2mm 0 4mm; break-inside: avoid; page-break-inside: avoid; }
+figure img { width: 100%; height: auto; display: block; }
+.cap img { width: auto; max-width: 100%; margin: 0 auto; }
+figcaption { font: 8.4pt/1.34 Calibri, "Helvetica Neue", Arial, sans-serif; color: #55524d; margin-top: 1.3mm; }
+figcaption b { color: #1a1a1a; font-weight: 600; }
+.row { display: flex; gap: 3.4mm; break-inside: avoid; page-break-inside: avoid; margin: 3.2mm 0 4mm; }
+.row figure { flex: 1 1 0; margin: 0; min-width: 0; }
+.half { width: 100%; }
+.half img { max-height: 78mm; }
+.f13 img { max-height: 104mm; }
+.row.tall img { width: 100%; height: auto; }
+table { border-collapse: collapse; width: 100%; font: 9.6pt/1.3 Calibri, "Helvetica Neue", Arial, sans-serif;
+        margin: 2.5mm 0 3.5mm; break-inside: avoid; }
+th { text-align: left; font-weight: 600; border-bottom: .9pt solid #1a1a1a; padding: 1.3mm 2mm; }
+td { padding: 1.05mm 2mm; border-bottom: .4pt solid #dddbd7; }
+td.n { text-align: right; font-variant-numeric: tabular-nums; width: 15%; }
+tr.hi td { background: #ebebeb; }
+tr.lo td { color: #8c8c8c; }
+code { font: 10.4pt Calibri, "Helvetica Neue", Arial, sans-serif; background: #f1efec; padding: 0 .7mm; border-radius: .6mm; }
+.appendix { font-size: 10pt; }
+.appendix p { margin-bottom: 1.6mm; }
+.row.input img { max-height: 52mm; }
+.row + .fnote, figure + .fnote { break-before: avoid; page-break-before: avoid; }
+.fnote { font: 9pt/1.4 Calibri, "Helvetica Neue", Arial, sans-serif; color: #6d6a65; }
+</style></head><body>
+
+<h1>What the Censor Cannot See</h1>
+<p class="byline">Ruyi Yang &middot; SCI 6492 Quantitative Aesthetics &middot; Assignment 07: Segmentation and Censorship</p>
+
+<p class="abstract">A censoring screen for Giambologna's <i>Ratto delle Sabine</i>, whose geometry is derived entirely from where a text-prompted segmentation model looks. The model turns out to be blind to nudity and fluent in violence. The screen inherits that blindness and makes it walkable.</p>
+
+<h2>1 &nbsp; Premise: who defines &ldquo;undesirable&rdquo;</h2>
+<p class="lead">The brief leaves the undesirable quality to the student. The obvious move is to pick one &mdash; nudity, violence, the subject matter &mdash; and design something that hides it. I did not want to author that judgment, because it is both the least interesting part and the least true to how censorship operates. Censorship at scale is not a person's judgment about an object; it is a policy executed by a classifier that has never seen the object it is ruling on.</p>
+<p>So I handed the definition over. I chose only the vocabulary: thirteen prompts spanning neutral anatomy, sexualized anatomy, and physical force. Everything after that is determined &mdash; what the model responds to, from where, and how strongly are the only inputs to the form, and no shape in the final object was drawn by hand. The result is wrong, and the wrongness is legible and attributable. That is the argument: a censoring apparatus whose criteria you can read off its silhouette.</p>
+
+<h2>2 &nbsp; Input</h2>
+<p>A scanned mesh of Giambologna's <i>Ratto delle Sabine</i> (1579&ndash;83), 1,493,064 vertices: three interlocked nude figures, at once a museum centrepiece and a depiction of abduction <b>[F1]</b>. It was chosen because the two candidate undesirable qualities &mdash; nudity and sexual violence &mdash; are inseparable in it. Any honest intervention has to choose between them, or reveal that it cannot tell them apart. The file arrived Y-up and was rotated &minus;90&deg; about X into Z-up: bounding box 56.3 &times; 44.8 &times; 116.1 units.</p>
+
+<div class="row input">
+  <figure><img src="figures/F1_input_az30.png" alt="sculpture at 30 degrees"><figcaption><b>F1a</b> &mdash; 30&deg;</figcaption></figure>
+  <figure><img src="figures/F1_input_az120.png" alt="sculpture at 120 degrees"><figcaption><b>F1b</b> &mdash; 120&deg;</figcaption></figure>
+  <figure><img src="figures/F1_input_az210.png" alt="sculpture at 210 degrees"><figcaption><b>F1c</b> &mdash; 210&deg;</figcaption></figure>
+  <figure><img src="figures/F1_input_az300.png" alt="sculpture at 300 degrees"><figcaption><b>F1d</b> &mdash; 300&deg;</figcaption></figure>
+</div>
+<p class="fnote">F1 &mdash; Giambologna, <i>Ratto delle Sabine</i>, 1579&ndash;83. Scanned mesh, 1.49M vertices, four azimuths 90&deg; apart. The <i>figura serpentinata</i> never presents the same reading twice; there is no front.</p>
+
+<h2>3 &nbsp; Method</h2>
+<p>The mesh is rendered in three.js from N cameras on a ring, each frame segmented by a text-prompted model, and the per-pixel values projected back onto the vertices through a depth test &mdash; an occluded vertex receives nothing. Settings: 24 cameras, 15&deg; apart, elevation 10&deg;, fov 40&deg;, 512&nbsp;px frames.</p>
+<p>One constraint in the rig matters for the argument. Camera distance is fixed at <code>radius / sin(fov/2)</code> = 2.92&thinsp;r, which puts the view cone exactly tangent to the bounding sphere. The camera is therefore always outside the object and always aimed at its centre: the apparatus cannot look from inside, cannot move closer, and cannot choose what to look at <b>[F2]</b>. It is a surveillance ring, not an eye. A side effect is that a tall narrow object wastes most of the frame, so the absolute values below are small and only their ratios carry meaning.</p>
+
+<figure>
+  <img src="figures/F2_camera_rig.png" alt="camera rig diagram in plan and section">
+  <figcaption><b>F2</b> &mdash; The 24-camera orbit in plan and section. The camera stands off at 2.92&thinsp;r so its 40&deg; cone is tangent to the bounding sphere; it can never look from inside, or closer.</figcaption>
+</figure>
+
+<h2>4 &nbsp; Experiments</h2>
+
+<h3>4.1 &nbsp; CLIP fails, and the failure is the subject</h3>
+<p>The first attempt used raw CLIP ViT-L/14 patch similarity. Asked for <i>genitals</i>, the strongest response sits in the empty background, not on the body <b>[F3]</b>. Put six anatomical prompts in competition and the white field gets carved into anatomical regions <b>[F4]</b> &mdash; the model assigns body parts to nothing at all. This is a known property of CLIP's final attention layer: patch tokens carry global image semantics rather than localized ones, so they are not in the text embedding space the similarity assumes. I report it because the failure mode <i>is</i> the subject &mdash; an apparatus that confidently labels empty space is precisely the kind deployed at scale. Everything after this uses CLIPSeg (rd64-refined), which has a decoder trained for localization.</p>
+
+<div class="row">
+  <figure><img src="maps/02_map_2_genitals.png" alt="CLIP similarity map for genitals">
+    <figcaption><b>F3</b> &mdash; CLIP ViT-L/14, similarity to &ldquo;genitals&rdquo;: the strongest response sits in the empty background, not on the body.</figcaption></figure>
+  <figure><img src="maps/01_seg_clip_l14_anatomy.png" alt="six anatomical prompts in competition">
+    <figcaption><b>F4</b> &mdash; The same six prompts in competition: the white field is carved into anatomical regions.</figcaption></figure>
+</div>
+
+<h3>4.2 &nbsp; The dividing line is sexualization, not anatomy</h3>
+<p>Thirteen prompts, peak mask value for each, measured on a single frame at azimuth 210&deg;, resolution 672:</p>
+
+<table>
+<tr><th>prompt</th><th class="n">peak</th><th>kind</th></tr>
+<tr><td>a face</td><td class="n">0.879</td><td>neutral anatomy</td></tr>
+<tr><td>thigh</td><td class="n">0.852</td><td>neutral anatomy</td></tr>
+<tr><td>a hand</td><td class="n">0.849</td><td>neutral anatomy</td></tr>
+<tr class="hi"><td>a struggling woman</td><td class="n">0.808</td><td>force</td></tr>
+<tr class="hi"><td>a hand gripping a body</td><td class="n">0.665</td><td>force</td></tr>
+<tr class="hi"><td>a man lifting a woman</td><td class="n">0.650</td><td>force</td></tr>
+<tr class="hi"><td>a restrained arm</td><td class="n">0.601</td><td>force</td></tr>
+<tr class="lo"><td>genitals</td><td class="n">0.258</td><td>sexualized anatomy</td></tr>
+<tr class="lo"><td>pubic area</td><td class="n">0.143</td><td>sexualized anatomy</td></tr>
+<tr class="lo"><td>bare breast</td><td class="n">0.051</td><td>sexualized anatomy</td></tr>
+<tr class="lo"><td>buttocks</td><td class="n">0.018</td><td>sexualized anatomy</td></tr>
+</table>
+
+<p>The model puts <i>a face</i> on exactly the two visible heads <b>[F5]</b> and <i>thigh</i> precisely on the standing man's thigh <b>[F7]</b>. Asked for <i>bare breast</i> &mdash; on three nude bodies, in the same frame, by the same model &mdash; it returns 0.051: nothing, anywhere <b>[F6]</b>.</p>
+<p>My first reading was that the model cannot resolve individually named parts and only understands whole figures. The <i>thigh</i> and <i>a hand</i> results disprove that, and I keep the wrong reading here because correcting it is what produced the finding. The line is not part versus whole, nor specific versus generic. The line is whether the word has been <b>sexualized</b>. Neutral anatomy is sharp; sexualized anatomy is absent. The absence is manufactured upstream: training corpora are filtered for NSFW content, and a term scrubbed from the captions a model was trained on cannot be grounded at inference. The model is not refusing. It genuinely has no idea what a breast is.</p>
+<p>Meanwhile <i>a struggling woman</i> peaks at 0.808 and lights the abducted figure up as a coherent whole <b>[F8]</b>; <i>a hand gripping a body</i>, <i>a man lifting a woman</i> and <i>a restrained arm</i> all clear 0.60. The violence is entirely legible. An automated censor, pointed at a sculpture of a rape, sees the assault and not the nipple.</p>
+
+<div class="row">
+  <figure><img src="maps/04_clipseg_3_a_face.png" alt="CLIPSeg a face">
+    <figcaption><b>F5</b> &mdash; &ldquo;a face&rdquo;, peak 0.879: two clean hot spots, exactly on the two visible heads.</figcaption></figure>
+  <figure><img src="maps/04_clipseg_0_bare_breast.png" alt="CLIPSeg bare breast">
+    <figcaption><b>F6</b> &mdash; &ldquo;bare breast&rdquo;, peak 0.051: no response anywhere, same model, same frame.</figcaption></figure>
+  <figure><img src="maps/11_thigh.png" alt="CLIPSeg thigh">
+    <figcaption><b>F7</b> &mdash; &ldquo;thigh&rdquo;, peak 0.852: a part term, landing exactly on the standing man's thigh.</figcaption></figure>
+  <figure><img src="maps/10_struggling_woman.png" alt="CLIPSeg a struggling woman">
+    <figcaption><b>F8</b> &mdash; &ldquo;a struggling woman&rdquo;, peak 0.808: the abducted figure lights up as a whole.</figcaption></figure>
+</div>
+
+<h3>4.3 &nbsp; Exposure is a property of the viewpoint</h3>
+<p>Using <i>a nude human body</i> &mdash; the highest-scoring prompt that still refers to the body as such &mdash; I measured the mean mask value at each of the 24 azimuths <b>[F9]</b>. It varies by 2.2&times;: a peak of 0.0731 at 60&deg;, a trough of 0.0331 at 135&deg;. At 60&deg; the abductor's torso faces the camera square-on <b>[F10]</b>; at 135&deg; the three figures stack into a narrow column and occlude one another <b>[F11]</b>.</p>
+<p>This is the result that turns measurement into architecture. The quantity being censored is not a property of the object &mdash; there is no <i>the nudity</i> sitting on the mesh waiting to be covered. There are angles from which the apparatus objects and angles from which it does not, which means censorship here is not a question of what to hide, but of where the viewer is permitted to stand.</p>
+
+<figure>
+  <img src="figures/F9_exposure_by_azimuth.png" alt="exposure by camera azimuth">
+  <figcaption><b>F9</b> &mdash; Exposure by camera azimuth: the most exposed view is 2.2&times; the most hidden one. The bands mark where the screen ends up solid and where it opens.</figcaption>
+</figure>
+
+<div class="row">
+  <figure><img src="maps/07_most_exposed_frame5_nudebody.png" alt="most exposed view">
+    <figcaption><b>F10</b> &mdash; Azimuth 60&deg;, the most exposed view: the abductor's whole torso faces the camera.</figcaption></figure>
+  <figure><img src="maps/07_least_exposed_frame10_nudebody.png" alt="least exposed view">
+    <figcaption><b>F11</b> &mdash; Azimuth 135&deg;, the most hidden view: the three figures stack into a narrow column.</figcaption></figure>
+</div>
+
+<h2>5 &nbsp; From attention to geometry</h2>
+<p>The 24 maps are averaged per vertex and written back onto the mesh as vertex colours <b>[F12]</b>. 1,434,801 of 1,493,064 vertices &mdash; 96.1% &mdash; receive a value. The remaining 58,263, or 3.9%, are never visible from any camera on the ring: interior crevices between the three bodies, undersides, the surfaces where the figures press against each other. They are by definition invisible in F12; the number can be stated but not pictured.</p>
+<p>Those vertices are also where the sculpture is most intimate. Giambologna's composition already censors itself: the parts a classifier would flag are the parts the <i>figura serpentinata</i> has folded inward, and the group spirals so that its most exposed moment is a function of orbit rather than of surface. The apparatus and the sculpture are doing the same thing by different means, four hundred years apart.</p>
+
+<div class="row">
+  <figure><img src="figures/F12_colored_az60.png" alt="vertex-coloured mesh at 60 degrees">
+    <figcaption><b>F12a</b> &mdash; azimuth 60&deg;</figcaption></figure>
+  <figure><img src="figures/F12_colored_az135.png" alt="vertex-coloured mesh at 135 degrees">
+    <figcaption><b>F12b</b> &mdash; azimuth 135&deg;</figcaption></figure>
+  <figure><img src="figures/F12_colored_az210.png" alt="vertex-coloured mesh at 210 degrees">
+    <figcaption><b>F12c</b> &mdash; azimuth 210&deg;</figcaption></figure>
+</div>
+<p class="fnote">F12 &mdash; The mesh carrying the averaged attention as vertex colour; warm where the model looked hardest. The 3.9% of vertices no camera ever saw keep their clay colour and are, by definition, not visible here.</p>
+
+<h2>6 &nbsp; The intervention</h2>
+<p>The screen is computed, not designed. A cylinder of vertical fins at radius 46, height 122, one fin every 2.5&deg;, each 0.9 units thick, in three stacked segments. The half-width of each fin is the normalized exposure measured at that azimuth. Where the model saw most, the fins grow until they meet their neighbours and the screen closes; where it saw least, they thin to nothing and are omitted &mdash; 135 of a possible 144 fins exist, and 9 fall below the threshold and simply do not appear.</p>
+<p>The result is more than 85% closed from 55&deg; to 92&deg; and fully open from 135&deg; to 180&deg; <b>[F13]</b>. Nothing about those two arcs was chosen; they are the exposure curve extruded into section. Walking the orbit, the group sits behind a solid white wall at 55&deg; and 75&deg;, begins to appear by 115&deg;, and stands completely unobstructed at 160&deg; <b>[F14]</b>. Across the far half of the circle, where the readings were middling, the screen neither fully closes nor fully clears <b>[F15]</b>. The animation runs the same ring at 5&deg; steps rather than 15&deg;, so the viewer's circuit is a finer-grained replay of the measurement, drawn in orthographic projection so that fin widths stay proportional to the values that generated them. Where the ring looked hardest, the ring now looks back.</p>
+
+<figure class="f13 cap">
+  <img src="figures/F13_plan_over_curve.png" alt="plan of fin widths over the exposure curve">
+  <figcaption><b>F13</b> &mdash; Plan: fin width per azimuth, drawn over the exposure curve. Solid 55&deg;&ndash;92&deg;, open 135&deg;&ndash;180&deg;.</figcaption>
+</figure>
+
+<div class="row tall">
+  <figure><img src="figures/F14_orbit_az55.png" alt="screen at 55 degrees"><figcaption><b>F14a</b> &mdash; 55&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az75.png" alt="screen at 75 degrees"><figcaption><b>F14b</b> &mdash; 75&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az115.png" alt="screen at 115 degrees"><figcaption><b>F14c</b> &mdash; 115&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az160.png" alt="screen at 160 degrees"><figcaption><b>F14d</b> &mdash; 160&deg;</figcaption></figure>
+</div>
+<p class="fnote">F14 &mdash; The closing arc, walked: solid at 55&deg; and 75&deg;, opening at 115&deg;, fully open at 160&deg;. No fin was placed by hand; each one is as wide as the value measured at its own azimuth.</p>
+<div class="row tall">
+  <figure><img src="figures/F14_orbit_az200.png" alt="screen at 200 degrees"><figcaption><b>F15a</b> &mdash; 200&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az245.png" alt="screen at 245 degrees"><figcaption><b>F15b</b> &mdash; 245&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az290.png" alt="screen at 290 degrees"><figcaption><b>F15c</b> &mdash; 290&deg;</figcaption></figure>
+  <figure><img src="figures/F14_orbit_az335.png" alt="screen at 335 degrees"><figcaption><b>F15d</b> &mdash; 335&deg;</figcaption></figure>
+</div>
+<p class="fnote">F15 &mdash; The far half of the orbit, where the model's readings were middling: the screen never fully closes and never fully clears. Together F14 and F15 sample the full circle at eight stations.</p>
+
+<h2>7 &nbsp; Reading</h2>
+<p><b>The criteria are visible.</b> A conventional censorship bar tells you that something was removed and nothing about why. This screen's silhouette is its policy document. You can stand at 160&deg;, see the entire group, and know that the apparatus found nothing there to object to.</p>
+<p><b>The policy is incoherent, and the incoherence is the content.</b> The screen is thickest where a single body faces outward and thinnest where three bodies are tangled most violently together. A viewer who walks the open arc is handed the clearest available view of the abduction, with the apparatus's full approval. What is protected is not the public but the training set's own squeamishness, which registers a nipple as a liability and an assault as a scene.</p>
+<p><b>The authorship is partial, and that is the point.</b> I chose thirteen words, which is a real editorial act. But I did not decide which would register, where they would peak, or what shape would come out. To change the form you change the twenty-four numbers in <code>EXPOSURE</code> in <code>make_screen.py</code> &mdash; which is to say you change the model, or the prompts. That is also how content moderation gets changed in practice, and it is why the result reads less like a design than like a policy made spatial.</p>
+
+<h2>8 &nbsp; Appendix</h2>
+<div class="appendix">
+<p><b>Models.</b> CLIPSeg rd64-refined (all reported measurements); CLIP ViT-L/14 datacomp and DINOv2 ViT-B/14 (&sect;4.1, reported as a negative result).</p>
+<p><b>Parameters.</b> 24 views &middot; elevation 10&deg; &middot; fov 40&deg; &middot; 512&nbsp;px frames &middot; clay material &middot; segmentation resolution 672 &middot; competition on, temperature 0.3.</p>
+<p><b>Screen.</b> Radius 46 &middot; height 122 &middot; fin thickness 0.9 &middot; one fin per 2.5&deg; &middot; 3 vertical segments &middot; 135 of 144 fins built.</p>
+<p><b>Rendering.</b> The final renders do not come from the segmentation app, which applies one material to the whole scene and so cannot distinguish the screen from the sculpture. The two layers are exported to raw binary geometry by <code>export_bin.py</code> and rendered by <code>render_orbit.html</code> (three.js r128): sculpture in mid-grey stone, screen in opaque white, black field, orthographic camera, 2&times; supersampling. The black field is load-bearing: with the gaps between fins reading black, the screen's opening and closing is legible in silhouette alone.</p>
+<p><b>Scripts.</b> <code>make_screen.py</code> regenerates the geometry from the 24 numbers in <code>EXPOSURE</code>; <code>figs_v2.py</code>, <code>fig_f2_v3.py</code>, <code>fig_f9.py</code> generate the drawn figures.</p>
+<p><b>Animation.</b> <code>sabine_screen_orbit_white.mp4</code> &mdash; 800&nbsp;px, 72 frames, 4&nbsp;s, orthographic, one full orbit on the analysis path.</p>
+<p><b>Files.</b> Three <code>.3dm</code> (rotated input, vertex-coloured mesh, screen + sculpture), the orbit <code>.mp4</code>, 27 segmentation maps, 18 figures, and the scripts that regenerate all of them. All under <code>07_segmentation/outputs/</code>.</p>
+</div>
+
+</body></html>

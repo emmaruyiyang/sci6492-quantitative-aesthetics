@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two Londons</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">Two Londons <span class="sub">Semantic Constellation · comparative literature</span></div>
+
+  <form id="query-form">
+    <input id="word" type="text" value="street" placeholder="Search a word" autocomplete="off" spellcheck="false" required>
+    <button type="submit">Compare</button>
+  </form>
+</header>
+
+<section class="toolbar">
+  <div class="control">
+    <span class="label">Words</span>
+    <div class="segmented" id="source" data-value="seed">
+      <button type="button" data-value="seed">Neighbours</button>
+      <button type="button" data-value="list">Gehl list</button>
+    </div>
+  </div>
+
+  <div class="control" id="top_n_control">
+    <span class="label">Per book</span>
+    <input id="top_n" type="range" min="5" max="30" value="15">
+    <output id="top_n_out">15</output>
+  </div>
+
+  <div class="control">
+    <span class="label">Layout</span>
+    <div class="segmented" id="layout" data-value="radial">
+      <button type="button" data-value="radial">Radial</button>
+      <button type="button" data-value="pca">PCA</button>
+    </div>
+  </div>
+
+  <div class="control">
+    <span class="label">Encoding</span>
+    <div class="segmented" id="mode" data-value="similarity">
+      <button type="button" data-value="similarity">Similarity</button>
+      <button type="button" data-value="shared">Shared</button>
+      <button type="button" data-value="color">Color words</button>
+      <button type="button" data-value="axis">Axis</button>
+    </div>
+  </div>
+
+  <div class="control" id="axis_control" hidden>
+    <span class="label">Axis</span>
+    <div class="segmented" id="axis" data-value="day-night">
+      <button type="button" data-value="day-night">day → night</button>
+      <button type="button" data-value="clean-dirty">clean → dirty</button>
+      <button type="button" data-value="warm-cold">warm → cold</button>
+      <button type="button" data-value="inside-outside">inside → outside</button>
+    </div>
+  </div>
+</section>
+
+<nav id="trail"></nav>
+
+<main>
+  <section class="panel" id="panel-holmes">
+    <div class="panel-head"></div>
+    <svg role="img" aria-label="word map, Sherlock Holmes"></svg>
+  </section>
+  <section class="panel" id="panel-abyss">
+    <div class="panel-head"></div>
+    <svg role="img" aria-label="word map, The People of the Abyss"></svg>
+  </section>
+
+  <aside id="legend"></aside>
+  <div id="tooltip" hidden></div>
+  <p id="message"></p>
+  <p id="model-note">word2vec · skip-gram · 100 dimensions · trained on each book</p>
+</main>
+
+<script src="/web/app.js"></script>
+</body>
+</html>

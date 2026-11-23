@@ -1,0 +1,1056 @@
+{
+ "model": "taste_ruyi_clip_datacomp",
+ "images": "../08_ranknet_datasets/gift-box-collection-210/renders",
+ "ranked": [
+  {
+   "name": "05-13-petal-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-13-petal-blue-satin.png",
+   "score": 3.663706064224243
+  },
+  {
+   "name": "02-20-capsule-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-20-capsule-sage-floral.png",
+   "score": 3.4635515213012695
+  },
+  {
+   "name": "03-E-triangle-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-E-triangle-blue-satin.png",
+   "score": 3.4137470722198486
+  },
+  {
+   "name": "10-15-rectangle-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-15-rectangle-speckled-clay.png",
+   "score": 3.250492572784424
+  },
+  {
+   "name": "08-15-pillow-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-15-pillow-speckled-clay.png",
+   "score": 3.171017646789551
+  },
+  {
+   "name": "04-20-bean-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-20-bean-sage-floral.png",
+   "score": 3.0579333305358887
+  },
+  {
+   "name": "10-20-rectangle-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-20-rectangle-sage-floral.png",
+   "score": 3.0376715660095215
+  },
+  {
+   "name": "05-F-petal-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-F-petal-butter-gloss.png",
+   "score": 3.0251383781433105
+  },
+  {
+   "name": "05-15-petal-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-15-petal-speckled-clay.png",
+   "score": 2.9613237380981445
+  },
+  {
+   "name": "05-20-petal-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-20-petal-sage-floral.png",
+   "score": 2.8649539947509766
+  },
+  {
+   "name": "05-16-petal-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-16-petal-brushed-metal.png",
+   "score": 2.8354427814483643
+  },
+  {
+   "name": "05-09-petal-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-09-petal-cotton-paper.png",
+   "score": 2.829458475112915
+  },
+  {
+   "name": "03-F-triangle-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-F-triangle-butter-gloss.png",
+   "score": 2.819169282913208
+  },
+  {
+   "name": "04-18-bean-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-18-bean-cream-stripes.png",
+   "score": 2.759058713912964
+  },
+  {
+   "name": "08-16-pillow-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-16-pillow-brushed-metal.png",
+   "score": 2.718299627304077
+  },
+  {
+   "name": "08-20-pillow-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-20-pillow-sage-floral.png",
+   "score": 2.650839328765869
+  },
+  {
+   "name": "05-D-petal-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-D-petal-blue.png",
+   "score": 2.607100009918213
+  },
+  {
+   "name": "05-A-petal-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-A-petal-lavender.png",
+   "score": 2.5991501808166504
+  },
+  {
+   "name": "05-B-petal-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-B-petal-sage-paper.png",
+   "score": 2.5806448459625244
+  },
+  {
+   "name": "05-G-petal-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-G-petal-pearl.png",
+   "score": 2.5723886489868164
+  },
+  {
+   "name": "05-D-petal-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-D-petal-lavender-ceramic.png",
+   "score": 2.5541257858276367
+  },
+  {
+   "name": "05-E-petal-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-E-petal-champagne.png",
+   "score": 2.515326976776123
+  },
+  {
+   "name": "10-13-rectangle-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-13-rectangle-blue-satin.png",
+   "score": 2.436062812805176
+  },
+  {
+   "name": "03-A-triangle-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-A-triangle-lavender.png",
+   "score": 2.4201745986938477
+  },
+  {
+   "name": "05-B-petal-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-B-petal-sage.png",
+   "score": 2.401416301727295
+  },
+  {
+   "name": "09-15-box-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-15-box-speckled-clay.png",
+   "score": 2.394209384918213
+  },
+  {
+   "name": "03-D-triangle-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-D-triangle-blue.png",
+   "score": 2.3465447425842285
+  },
+  {
+   "name": "03-18-triangle-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-18-triangle-cream-stripes.png",
+   "score": 2.3460803031921387
+  },
+  {
+   "name": "03-H-triangle-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-H-triangle-brushed-metal.png",
+   "score": 2.334993362426758
+  },
+  {
+   "name": "04-G-bean-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-G-bean-speckled-clay.png",
+   "score": 2.3004345893859863
+  },
+  {
+   "name": "01-20-pebble-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-20-pebble-sage-floral.png",
+   "score": 2.276400089263916
+  },
+  {
+   "name": "05-18-petal-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-18-petal-cream-stripes.png",
+   "score": 2.2762813568115234
+  },
+  {
+   "name": "03-B-triangle-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-B-triangle-sage.png",
+   "score": 2.1821274757385254
+  },
+  {
+   "name": "01-E-pebble-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-E-pebble-blue-satin.png",
+   "score": 2.1791152954101562
+  },
+  {
+   "name": "06-E-teardrop-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-E-teardrop-blue-satin.png",
+   "score": 2.1695117950439453
+  },
+  {
+   "name": "08-13-pillow-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-13-pillow-blue-satin.png",
+   "score": 2.16660737991333
+  },
+  {
+   "name": "08-19-pillow-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-19-pillow-lilac-checker.png",
+   "score": 2.109569549560547
+  },
+  {
+   "name": "03-A-triangle-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-A-triangle-cotton-paper.png",
+   "score": 2.0984208583831787
+  },
+  {
+   "name": "06-20-teardrop-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-20-teardrop-sage-floral.png",
+   "score": 2.070795774459839
+  },
+  {
+   "name": "01-F-pebble-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-F-pebble-butter-gloss.png",
+   "score": 2.0689425468444824
+  },
+  {
+   "name": "09-18-box-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-18-box-cream-stripes.png",
+   "score": 2.054574966430664
+  },
+  {
+   "name": "05-17-petal-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-17-petal-solid-black.png",
+   "score": 2.0476369857788086
+  },
+  {
+   "name": "03-20-triangle-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-20-triangle-sage-floral.png",
+   "score": 2.013019561767578
+  },
+  {
+   "name": "03-E-triangle-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-E-triangle-champagne.png",
+   "score": 2.0125017166137695
+  },
+  {
+   "name": "06-15-teardrop-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-15-teardrop-speckled-clay.png",
+   "score": 2.0039126873016357
+  },
+  {
+   "name": "05-11-petal-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-11-petal-rose-soft.png",
+   "score": 1.981170415878296
+  },
+  {
+   "name": "08-18-pillow-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-18-pillow-cream-stripes.png",
+   "score": 1.9425058364868164
+  },
+  {
+   "name": "09-20-box-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-20-box-sage-floral.png",
+   "score": 1.9344216585159302
+  },
+  {
+   "name": "08-F-pillow-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-F-pillow-butter-gloss.png",
+   "score": 1.9037163257598877
+  },
+  {
+   "name": "03-G-triangle-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-G-triangle-pearl.png",
+   "score": 1.8754315376281738
+  },
+  {
+   "name": "09-13-box-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-13-box-blue-satin.png",
+   "score": 1.867164134979248
+  },
+  {
+   "name": "03-19-triangle-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-19-triangle-lilac-checker.png",
+   "score": 1.8665844202041626
+  },
+  {
+   "name": "06-14-teardrop-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-14-teardrop-butter-gloss.png",
+   "score": 1.8511865139007568
+  },
+  {
+   "name": "10-F-rectangle-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-F-rectangle-butter-gloss.png",
+   "score": 1.8459737300872803
+  },
+  {
+   "name": "06-18-teardrop-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-18-teardrop-cream-stripes.png",
+   "score": 1.8194119930267334
+  },
+  {
+   "name": "04-H-bean-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-H-bean-brushed-metal.png",
+   "score": 1.8135318756103516
+  },
+  {
+   "name": "05-C-petal-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-C-petal-rose.png",
+   "score": 1.798201560974121
+  },
+  {
+   "name": "03-G-triangle-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-G-triangle-speckled-clay.png",
+   "score": 1.772056221961975
+  },
+  {
+   "name": "09-14-box-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-14-box-butter-gloss.png",
+   "score": 1.753088355064392
+  },
+  {
+   "name": "08-21-pillow-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-21-pillow-rose-marble.png",
+   "score": 1.7453718185424805
+  },
+  {
+   "name": "03-D-triangle-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-D-triangle-lavender-ceramic.png",
+   "score": 1.6945161819458008
+  },
+  {
+   "name": "10-12-rectangle-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-12-rectangle-lavender-ceramic.png",
+   "score": 1.6831119060516357
+  },
+  {
+   "name": "04-F-bean-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-F-bean-butter-gloss.png",
+   "score": 1.6439177989959717
+  },
+  {
+   "name": "01-H-pebble-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-H-pebble-brushed-metal.png",
+   "score": 1.6341553926467896
+  },
+  {
+   "name": "10-01-rectangle-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-01-rectangle-lavender.png",
+   "score": 1.6217385530471802
+  },
+  {
+   "name": "07-14-column-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-14-column-butter-gloss.png",
+   "score": 1.6156907081604004
+  },
+  {
+   "name": "01-A-pebble-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-A-pebble-lavender.png",
+   "score": 1.6156566143035889
+  },
+  {
+   "name": "09-H-box-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-H-box-brushed-metal.png",
+   "score": 1.5901693105697632
+  },
+  {
+   "name": "08-D-pillow-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-D-pillow-lavender-ceramic.png",
+   "score": 1.5822322368621826
+  },
+  {
+   "name": "06-H-teardrop-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-H-teardrop-brushed-metal.png",
+   "score": 1.5811549425125122
+  },
+  {
+   "name": "10-18-rectangle-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-18-rectangle-cream-stripes.png",
+   "score": 1.5786699056625366
+  },
+  {
+   "name": "08-A-pillow-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-A-pillow-lavender.png",
+   "score": 1.5522422790527344
+  },
+  {
+   "name": "02-G-capsule-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-G-capsule-speckled-clay.png",
+   "score": 1.5497772693634033
+  },
+  {
+   "name": "04-E-bean-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-E-bean-blue-satin.png",
+   "score": 1.4920120239257812
+  },
+  {
+   "name": "01-18-pebble-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-18-pebble-cream-stripes.png",
+   "score": 1.4786415100097656
+  },
+  {
+   "name": "04-19-bean-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-19-bean-lilac-checker.png",
+   "score": 1.4714057445526123
+  },
+  {
+   "name": "06-19-teardrop-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-19-teardrop-lilac-checker.png",
+   "score": 1.4702352285385132
+  },
+  {
+   "name": "10-10-rectangle-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-10-rectangle-sage-paper.png",
+   "score": 1.4652588367462158
+  },
+  {
+   "name": "08-09-pillow-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-09-pillow-cotton-paper.png",
+   "score": 1.4336354732513428
+  },
+  {
+   "name": "09-19-box-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-19-box-lilac-checker.png",
+   "score": 1.4233272075653076
+  },
+  {
+   "name": "04-A-bean-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-A-bean-cotton-paper.png",
+   "score": 1.41544771194458
+  },
+  {
+   "name": "03-C-triangle-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-C-triangle-rose-soft.png",
+   "score": 1.3856744766235352
+  },
+  {
+   "name": "08-10-pillow-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-10-pillow-sage-paper.png",
+   "score": 1.3715810775756836
+  },
+  {
+   "name": "02-18-capsule-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-18-capsule-cream-stripes.png",
+   "score": 1.36747145652771
+  },
+  {
+   "name": "03-F-triangle-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-F-triangle-smoke.png",
+   "score": 1.3484516143798828
+  },
+  {
+   "name": "09-B-box-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-B-box-sage-paper.png",
+   "score": 1.3436821699142456
+  },
+  {
+   "name": "05-F-petal-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-F-petal-smoke.png",
+   "score": 1.3421401977539062
+  },
+  {
+   "name": "01-G-pebble-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-G-pebble-speckled-clay.png",
+   "score": 1.3354412317276
+  },
+  {
+   "name": "09-A-box-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-A-box-cotton-paper.png",
+   "score": 1.3130993843078613
+  },
+  {
+   "name": "03-B-triangle-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-B-triangle-sage-paper.png",
+   "score": 1.2790346145629883
+  },
+  {
+   "name": "01-19-pebble-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-19-pebble-lilac-checker.png",
+   "score": 1.2773771286010742
+  },
+  {
+   "name": "10-09-rectangle-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-09-rectangle-cotton-paper.png",
+   "score": 1.2631902694702148
+  },
+  {
+   "name": "10-16-rectangle-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-16-rectangle-brushed-metal.png",
+   "score": 1.2601417303085327
+  },
+  {
+   "name": "10-02-rectangle-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-02-rectangle-sage.png",
+   "score": 1.243109941482544
+  },
+  {
+   "name": "06-A-teardrop-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-A-teardrop-lavender.png",
+   "score": 1.2347089052200317
+  },
+  {
+   "name": "05-H-petal-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-H-petal-clear-lilac.png",
+   "score": 1.2147278785705566
+  },
+  {
+   "name": "09-12-box-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-12-box-lavender-ceramic.png",
+   "score": 1.1930572986602783
+  },
+  {
+   "name": "10-19-rectangle-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-19-rectangle-lilac-checker.png",
+   "score": 1.1643898487091064
+  },
+  {
+   "name": "07-20-column-sage-floral.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-20-column-sage-floral.png",
+   "score": 1.160032033920288
+  },
+  {
+   "name": "04-A-bean-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-A-bean-lavender.png",
+   "score": 1.146437406539917
+  },
+  {
+   "name": "08-C-pillow-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-C-pillow-rose-soft.png",
+   "score": 1.1068778038024902
+  },
+  {
+   "name": "02-H-capsule-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-H-capsule-brushed-metal.png",
+   "score": 1.0948193073272705
+  },
+  {
+   "name": "04-D-bean-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-D-bean-lavender-ceramic.png",
+   "score": 1.086748480796814
+  },
+  {
+   "name": "03-C-triangle-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-C-triangle-rose.png",
+   "score": 1.053508996963501
+  },
+  {
+   "name": "10-05-rectangle-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-05-rectangle-champagne.png",
+   "score": 1.0518567562103271
+  },
+  {
+   "name": "04-B-bean-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-B-bean-sage-paper.png",
+   "score": 1.0495485067367554
+  },
+  {
+   "name": "02-E-capsule-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-E-capsule-blue-satin.png",
+   "score": 1.0418227910995483
+  },
+  {
+   "name": "06-B-teardrop-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-B-teardrop-sage.png",
+   "score": 1.0324876308441162
+  },
+  {
+   "name": "10-11-rectangle-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-11-rectangle-rose-soft.png",
+   "score": 1.0320303440093994
+  },
+  {
+   "name": "01-B-pebble-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-B-pebble-sage.png",
+   "score": 1.0107887983322144
+  },
+  {
+   "name": "03-17-triangle-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-17-triangle-solid-black.png",
+   "score": 1.0054371356964111
+  },
+  {
+   "name": "10-21-rectangle-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-21-rectangle-rose-marble.png",
+   "score": 1.0049066543579102
+  },
+  {
+   "name": "06-12-teardrop-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-12-teardrop-lavender-ceramic.png",
+   "score": 0.9913046956062317
+  },
+  {
+   "name": "09-11-box-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-11-box-rose-soft.png",
+   "score": 0.9698269367218018
+  },
+  {
+   "name": "04-B-bean-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-B-bean-sage.png",
+   "score": 0.9660608172416687
+  },
+  {
+   "name": "08-B-pillow-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-B-pillow-sage.png",
+   "score": 0.9602992534637451
+  },
+  {
+   "name": "03-H-triangle-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-H-triangle-clear-lilac.png",
+   "score": 0.901746928691864
+  },
+  {
+   "name": "02-21-capsule-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-21-capsule-rose-marble.png",
+   "score": 0.8955036401748657
+  },
+  {
+   "name": "01-D-pebble-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-D-pebble-blue.png",
+   "score": 0.8814698457717896
+  },
+  {
+   "name": "10-04-rectangle-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-04-rectangle-blue.png",
+   "score": 0.8673406839370728
+  },
+  {
+   "name": "02-E-capsule-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-E-capsule-champagne.png",
+   "score": 0.8604655265808105
+  },
+  {
+   "name": "01-G-pebble-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-G-pebble-pearl.png",
+   "score": 0.8136637210845947
+  },
+  {
+   "name": "04-G-bean-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-G-bean-pearl.png",
+   "score": 0.8088932037353516
+  },
+  {
+   "name": "09-A-box-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-A-box-lavender.png",
+   "score": 0.8048311471939087
+  },
+  {
+   "name": "01-D-pebble-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-D-pebble-lavender-ceramic.png",
+   "score": 0.8046178817749023
+  },
+  {
+   "name": "09-G-box-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-G-box-pearl.png",
+   "score": 0.8028675317764282
+  },
+  {
+   "name": "02-A-capsule-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-A-capsule-lavender.png",
+   "score": 0.7914626598358154
+  },
+  {
+   "name": "08-E-pillow-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-E-pillow-champagne.png",
+   "score": 0.7869638204574585
+  },
+  {
+   "name": "06-G-teardrop-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-G-teardrop-pearl.png",
+   "score": 0.7851126790046692
+  },
+  {
+   "name": "10-03-rectangle-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-03-rectangle-rose.png",
+   "score": 0.7801604270935059
+  },
+  {
+   "name": "08-G-pillow-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-G-pillow-pearl.png",
+   "score": 0.7721509337425232
+  },
+  {
+   "name": "06-C-teardrop-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-C-teardrop-rose-soft.png",
+   "score": 0.7549675703048706
+  },
+  {
+   "name": "07-19-column-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-19-column-lilac-checker.png",
+   "score": 0.7245813012123108
+  },
+  {
+   "name": "02-F-capsule-butter-gloss.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-F-capsule-butter-gloss.png",
+   "score": 0.7159481048583984
+  },
+  {
+   "name": "07-18-column-cream-stripes.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-18-column-cream-stripes.png",
+   "score": 0.7002648115158081
+  },
+  {
+   "name": "04-C-bean-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-C-bean-rose-soft.png",
+   "score": 0.6875404715538025
+  },
+  {
+   "name": "06-09-teardrop-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-09-teardrop-cotton-paper.png",
+   "score": 0.6868422031402588
+  },
+  {
+   "name": "05-19-petal-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-19-petal-lilac-checker.png",
+   "score": 0.6854972839355469
+  },
+  {
+   "name": "08-C-pillow-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-C-pillow-rose.png",
+   "score": 0.6716639995574951
+  },
+  {
+   "name": "01-A-pebble-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-A-pebble-cotton-paper.png",
+   "score": 0.6613298654556274
+  },
+  {
+   "name": "02-19-capsule-lilac-checker.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-19-capsule-lilac-checker.png",
+   "score": 0.6505069732666016
+  },
+  {
+   "name": "10-07-rectangle-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-07-rectangle-pearl.png",
+   "score": 0.6114804744720459
+  },
+  {
+   "name": "01-E-pebble-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-E-pebble-champagne.png",
+   "score": 0.5922914743423462
+  },
+  {
+   "name": "09-B-box-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-B-box-sage.png",
+   "score": 0.5606261491775513
+  },
+  {
+   "name": "01-F-pebble-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-F-pebble-smoke.png",
+   "score": 0.5346075296401978
+  },
+  {
+   "name": "08-17-pillow-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-17-pillow-solid-black.png",
+   "score": 0.5273778438568115
+  },
+  {
+   "name": "02-D-capsule-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-D-capsule-lavender-ceramic.png",
+   "score": 0.5027378797531128
+  },
+  {
+   "name": "01-C-pebble-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-C-pebble-rose-soft.png",
+   "score": 0.5000575184822083
+  },
+  {
+   "name": "01-C-pebble-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-C-pebble-rose.png",
+   "score": 0.4409995377063751
+  },
+  {
+   "name": "09-C-box-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-C-box-rose.png",
+   "score": 0.39541715383529663
+  },
+  {
+   "name": "06-C-teardrop-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-C-teardrop-rose.png",
+   "score": 0.3884260952472687
+  },
+  {
+   "name": "01-H-pebble-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-H-pebble-clear-lilac.png",
+   "score": 0.3871243894100189
+  },
+  {
+   "name": "06-D-teardrop-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-D-teardrop-blue.png",
+   "score": 0.3638303279876709
+  },
+  {
+   "name": "04-D-bean-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-D-bean-blue.png",
+   "score": 0.31856608390808105
+  },
+  {
+   "name": "07-G-column-speckled-clay.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-G-column-speckled-clay.png",
+   "score": 0.31833162903785706
+  },
+  {
+   "name": "04-17-bean-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-17-bean-solid-black.png",
+   "score": 0.31254178285598755
+  },
+  {
+   "name": "09-D-box-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-D-box-blue.png",
+   "score": 0.2799699306488037
+  },
+  {
+   "name": "02-C-capsule-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-C-capsule-rose-soft.png",
+   "score": 0.23477786779403687
+  },
+  {
+   "name": "09-E-box-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-E-box-champagne.png",
+   "score": 0.22722575068473816
+  },
+  {
+   "name": "02-B-capsule-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-B-capsule-sage.png",
+   "score": 0.21691372990608215
+  },
+  {
+   "name": "02-B-capsule-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-B-capsule-sage-paper.png",
+   "score": 0.20729228854179382
+  },
+  {
+   "name": "08-D-pillow-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-D-pillow-blue.png",
+   "score": 0.19990843534469604
+  },
+  {
+   "name": "09-H-box-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-H-box-clear-lilac.png",
+   "score": 0.16861149668693542
+  },
+  {
+   "name": "04-E-bean-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-E-bean-champagne.png",
+   "score": 0.16431307792663574
+  },
+  {
+   "name": "02-C-capsule-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-C-capsule-rose.png",
+   "score": 0.14144772291183472
+  },
+  {
+   "name": "06-10-teardrop-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-10-teardrop-sage-paper.png",
+   "score": 0.13897845149040222
+  },
+  {
+   "name": "07-H-column-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-H-column-clear-lilac.png",
+   "score": 0.12131136655807495
+  },
+  {
+   "name": "02-D-capsule-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-D-capsule-blue.png",
+   "score": 0.11611214280128479
+  },
+  {
+   "name": "04-C-bean-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-C-bean-rose.png",
+   "score": 0.10935923457145691
+  },
+  {
+   "name": "01-B-pebble-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-B-pebble-sage-paper.png",
+   "score": 0.09926453232765198
+  },
+  {
+   "name": "06-E-teardrop-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-E-teardrop-champagne.png",
+   "score": 0.08757328987121582
+  },
+  {
+   "name": "09-F-box-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-F-box-smoke.png",
+   "score": 0.07762059569358826
+  },
+  {
+   "name": "02-A-capsule-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-A-capsule-cotton-paper.png",
+   "score": 0.03384128212928772
+  },
+  {
+   "name": "08-F-pillow-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-F-pillow-smoke.png",
+   "score": 0.029804199934005737
+  },
+  {
+   "name": "02-G-capsule-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-G-capsule-pearl.png",
+   "score": -0.0126190185546875
+  },
+  {
+   "name": "10-17-rectangle-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-17-rectangle-solid-black.png",
+   "score": -0.02908220887184143
+  },
+  {
+   "name": "10-06-rectangle-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-06-rectangle-smoke.png",
+   "score": -0.07214727997779846
+  },
+  {
+   "name": "02-F-capsule-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-F-capsule-smoke.png",
+   "score": -0.09192481637001038
+  },
+  {
+   "name": "03-21-triangle-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/03-21-triangle-rose-marble.png",
+   "score": -0.099323570728302
+  },
+  {
+   "name": "01-17-pebble-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-17-pebble-solid-black.png",
+   "score": -0.12812736630439758
+  },
+  {
+   "name": "07-16-column-brushed-metal.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-16-column-brushed-metal.png",
+   "score": -0.18969011306762695
+  },
+  {
+   "name": "07-12-column-lavender-ceramic.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-12-column-lavender-ceramic.png",
+   "score": -0.197325199842453
+  },
+  {
+   "name": "08-H-pillow-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/08-H-pillow-clear-lilac.png",
+   "score": -0.20363333821296692
+  },
+  {
+   "name": "05-21-petal-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/05-21-petal-rose-marble.png",
+   "score": -0.23078906536102295
+  },
+  {
+   "name": "07-E-column-blue-satin.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-E-column-blue-satin.png",
+   "score": -0.2747410535812378
+  },
+  {
+   "name": "10-08-rectangle-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/10-08-rectangle-clear-lilac.png",
+   "score": -0.2999906539916992
+  },
+  {
+   "name": "07-11-column-rose-soft.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-11-column-rose-soft.png",
+   "score": -0.3711719810962677
+  },
+  {
+   "name": "02-17-capsule-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-17-capsule-solid-black.png",
+   "score": -0.4465203285217285
+  },
+  {
+   "name": "06-H-teardrop-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-H-teardrop-clear-lilac.png",
+   "score": -0.4621117115020752
+  },
+  {
+   "name": "02-H-capsule-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/02-H-capsule-clear-lilac.png",
+   "score": -0.46710389852523804
+  },
+  {
+   "name": "01-21-pebble-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/01-21-pebble-rose-marble.png",
+   "score": -0.4754437506198883
+  },
+  {
+   "name": "06-F-teardrop-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-F-teardrop-smoke.png",
+   "score": -0.49530690908432007
+  },
+  {
+   "name": "06-17-teardrop-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-17-teardrop-solid-black.png",
+   "score": -0.4991625249385834
+  },
+  {
+   "name": "04-F-bean-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-F-bean-smoke.png",
+   "score": -0.5432738065719604
+  },
+  {
+   "name": "09-21-box-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-21-box-rose-marble.png",
+   "score": -0.5489866733551025
+  },
+  {
+   "name": "06-21-teardrop-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/06-21-teardrop-rose-marble.png",
+   "score": -0.7133594751358032
+  },
+  {
+   "name": "07-10-column-sage-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-10-column-sage-paper.png",
+   "score": -0.7521623373031616
+  },
+  {
+   "name": "04-H-bean-clear-lilac.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-H-bean-clear-lilac.png",
+   "score": -0.7670981884002686
+  },
+  {
+   "name": "07-A-column-cotton-paper.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-A-column-cotton-paper.png",
+   "score": -0.8027424216270447
+  },
+  {
+   "name": "09-17-box-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/09-17-box-solid-black.png",
+   "score": -0.9769834876060486
+  },
+  {
+   "name": "07-E-column-champagne.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-E-column-champagne.png",
+   "score": -1.0358972549438477
+  },
+  {
+   "name": "07-C-column-rose.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-C-column-rose.png",
+   "score": -1.1280691623687744
+  },
+  {
+   "name": "07-A-column-lavender.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-A-column-lavender.png",
+   "score": -1.1363558769226074
+  },
+  {
+   "name": "04-21-bean-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/04-21-bean-rose-marble.png",
+   "score": -1.1661443710327148
+  },
+  {
+   "name": "07-D-column-blue.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-D-column-blue.png",
+   "score": -1.2762327194213867
+  },
+  {
+   "name": "07-B-column-sage.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-B-column-sage.png",
+   "score": -1.3669999837875366
+  },
+  {
+   "name": "07-G-column-pearl.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-G-column-pearl.png",
+   "score": -1.6382157802581787
+  },
+  {
+   "name": "07-17-column-solid-black.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-17-column-solid-black.png",
+   "score": -1.8165913820266724
+  },
+  {
+   "name": "07-F-column-smoke.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-F-column-smoke.png",
+   "score": -1.9033719301223755
+  },
+  {
+   "name": "07-21-column-rose-marble.png",
+   "path": "../08_ranknet_datasets/gift-box-collection-210/renders/07-21-column-rose-marble.png",
+   "score": -2.463632106781006
+  }
+ ]
+}

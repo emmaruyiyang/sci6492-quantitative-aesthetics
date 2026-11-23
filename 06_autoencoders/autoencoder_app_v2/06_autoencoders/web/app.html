@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Embedding Map</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="map" class="active" aria-selected="true">Embedding Map</button>
+      <button role="tab" data-view="train" aria-selected="false">Training</button>
+      <button role="tab" data-view="data" aria-selected="false">Dataset</button>
+    </nav>
+    <p id="tab-hint">Images placed by the vectors a model gives them, squeezed to 2D and grouped into clusters.</p>
+  </header>
+
+  <main id="view-map">
+    <div class="side">
+      <section class="panel">
+        <h2>Data</h2>
+        <div class="toolbar column">
+          <label class="pick">model <select id="model"></select></label>
+          <label class="pick">dataset <select id="dataset"></select></label>
+          <label class="pick" title="bigger datasets use a random sample of this many images">max images <input id="max-images" type="number" min="10" step="100" value="1000"></label>
+        </div>
+        <div class="toolbar">
+          <button id="rescan" title="look for new model and dataset folders">Rescan folders</button>
+        </div>
+        <p class="status" id="status">loading…</p>
+        <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+      </section>
+
+      <section class="panel">
+        <h2>Projection</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="projection"></select></label>
+          <label class="slider" id="perplexity-row">perplexity <input id="perplexity" type="range" min="5" max="100" value="30"><output id="perplexity-out">30</output></label>
+          <label class="slider" id="neighbors-row">neighbours <input id="neighbors" type="range" min="2" max="100" value="15"><output id="neighbors-out">15</output></label>
+          <label class="pick">vectors
+            <select id="prep" title="default: the best way to compare this model's vectors; anything else overrides it"></select>
+          </label>
+          <label><input id="align" type="checkbox" checked> align with previous map</label>
+          <label><input id="quantize" type="checkbox"> quantized tiles</label>
+          <label class="slider" id="subdivisions-row" hidden>subdivisions <input id="subdivisions" type="range" min="4" max="150" value="40"><output id="subdivisions-out">40</output></label>
+          <label class="slider" id="gap-row" hidden>gap <input id="gap" type="range" min="0" max="0.6" step="0.05" value="0"><output id="gap-out">0</output></label>
+        </div>
+        <p class="hint" id="projection-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Clustering</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="clustering"></select></label>
+          <label class="pick">on
+            <select id="cluster-on">
+              <option value="embedding">the vectors</option>
+              <option value="map">the 2D map</option>
+            </select>
+          </label>
+          <label class="slider" id="k-row">clusters <input id="k" type="range" min="2" max="30" value="8"><output id="k-out">8</output></label>
+          <label class="pick" id="eps-row">eps <input id="eps" type="number" min="0.001" step="0.01" value="0.5"></label>
+          <label class="pick" id="min-samples-row">min samples <input id="min-samples" type="number" min="1" step="1" value="5"></label>
+        </div>
+        <p class="hint" id="cluster-hint"></p>
+        <div id="legend"></div>
+      </section>
+
+      <section class="panel" id="interp-panel" hidden>
+        <h2>Interpolation</h2>
+        <div class="pick-pair">
+          <button class="pick" id="pick-a" title="click, then click an image on the map"><img alt="" hidden><span>A</span></button>
+          <span class="arrow">→</span>
+          <button class="pick" id="pick-b" title="click, then click an image on the map"><img alt="" hidden><span>B</span></button>
+        </div>
+        <div class="toolbar">
+          <label class="pick">steps <input id="interp-steps" type="number" min="1" max="100" step="1" value="8"></label>
+          <button id="interp-clear">Clear</button>
+        </div>
+        <p class="hint" id="interp-hint">Click A or B, then an image on the map. The codes in between are decoded, encoded again and placed among their nearest images.</p>
+        <div id="interp-anim" hidden>
+          <img id="interp-frame" alt="interpolation, animated" title="click: pause / play">
+          <div class="anim-bar">
+            <span id="interp-frame-label"></span>
+            <label class="slider">speed <input id="interp-fps" type="range" min="1" max="30" value="8"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Display</h2>
+        <div class="toolbar column">
+          <label><input id="thumbnails" type="checkbox" checked> thumbnails <span class="note">(off: dots)</span></label>
+          <label><input id="borders" type="checkbox" checked> borders <span class="note">(cluster colors)</span></label>
+          <label class="slider">size <input id="item-size" type="range" min="6" max="120" value="40"></label>
+          <label class="pick">background <input id="map-bg" type="color" value="#ececec"></label>
+        </div>
+        <p class="hint">Scroll to zoom, drag to pan, double-click to reset.</p>
+        <div class="toolbar">
+          <button id="export-pdf" title="save the map as it is shown now (zoom, pan, highlighted cluster...) as a PDF">Export PDF</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel map-panel">
+      <div id="map">
+        <div id="items"></div>
+        <svg id="interp-line"><polyline></polyline></svg>
+        <div id="interp-items"></div>
+        <div id="empty">pick a model and a dataset</div>
+      </div>
+    </section>
+
+    <section class="panel info" id="info">
+      <h2>Image</h2>
+      <p class="hint" id="info-empty">Hover an image on the map.</p>
+      <div id="info-body" hidden>
+        <div class="pair">
+          <figure><img id="info-image" alt=""><figcaption>image</figcaption></figure>
+          <figure id="info-recon-figure"><img id="info-recon" alt=""><figcaption>reconstruction</figcaption></figure>
+        </div>
+        <div id="info-name"></div>
+        <div id="info-cluster"></div>
+        <canvas id="barcode" width="600" height="60"></canvas>
+        <div class="barcode-scale"><span>−2σ</span><span id="barcode-label">vector vs. dataset mean</span><span>+2σ</span></div>
+        <label><input id="barcode-raw" type="checkbox"> raw values</label>
+        <div id="info-classes" hidden></div>
+        <audio id="info-audio" controls preload="none" hidden></audio>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-train" class="train" hidden>
+    <div class="side">
+      <section class="panel">
+        <h2>New training</h2>
+        <div class="segmented" id="t-kind">
+          <button data-kind="autoencoder" class="active">Autoencoder</button>
+          <button data-kind="classifier">Classifier</button>
+        </div>
+        <div class="toolbar column">
+          <label class="pick">name <input id="t-name" type="text" placeholder="my_model" spellcheck="false"></label>
+          <p class="hint" id="t-name-info"></p>
+          <label><input id="t-continue" type="checkbox"> continue training if it exists</label>
+          <label class="pick">dataset <select id="t-dataset"></select></label>
+          <p class="hint" id="t-dataset-info"></p>
+        </div>
+      </section>
+
+      <section class="panel" id="t-ae">
+        <h2>Autoencoder</h2>
+        <fieldset id="t-ae-fields">
+          <div class="toolbar column">
+            <label class="pick">type <select id="t-ae-type"></select></label>
+            <label class="pick">image size <input id="t-image-size" type="number" min="16" step="16" value="64"></label>
+            <label class="pick">latent size <input id="t-latent" type="number" min="2" step="1" value="128"></label>
+            <div id="t-ae-options" class="toolbar column"></div>
+          </div>
+        </fieldset>
+        <p class="hint" id="t-ae-hint"></p>
+      </section>
+
+      <section class="panel" id="t-clf" hidden>
+        <h2>Classifier</h2>
+        <fieldset id="t-clf-fields">
+          <div class="toolbar column">
+            <label class="pick">backbone <select id="t-backbone"></select></label>
+            <label class="pick">head
+              <select id="t-head"><option value="linear">linear</option><option value="mlp">mlp</option></select>
+            </label>
+            <label class="pick" id="t-hidden-row">hidden size <input id="t-hidden" type="number" min="8" step="8" value="512"></label>
+          </div>
+        </fieldset>
+        <div class="toolbar column">
+          <label class="pick" id="t-dropout-row">dropout <input id="t-dropout" type="number" min="0" max="0.9" step="0.05" value="0.2"></label>
+          <label><input id="t-freeze" type="checkbox" checked> freeze backbone <span class="note">(off: fine-tune)</span></label>
+          <label class="pick" id="t-bblr-row">backbone lr × <input id="t-bblr" type="number" min="0" step="0.05" value="0.1"></label>
+        </div>
+        <p class="hint" id="t-clf-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Training</h2>
+        <div class="toolbar column">
+          <label class="pick">epochs <input id="t-epochs" type="number" min="1" step="1" value="50"></label>
+          <label class="pick">learning rate <input id="t-lr" type="number" min="0" step="any" value="0.001"></label>
+          <label class="pick">batch size <input id="t-batch" type="number" min="1" step="1" value="64"></label>
+          <label class="pick">evaluation % <input id="t-eval" type="number" min="0" max="90" step="1" value="10"></label>
+          <label class="pick" title="0: only after the last epoch">save every <input id="t-save-every" type="number" min="0" step="1" value="10"></label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Augmentation</h2>
+        <div class="toolbar column">
+          <label><input id="t-augment" type="checkbox" checked> augment the training images</label>
+        </div>
+        <fieldset id="t-aug-fields">
+          <div class="toolbar column">
+            <label><input id="t-flip" type="checkbox" checked> random horizontal flip</label>
+            <label class="pick" title="0 = off">rotation ± degrees <input id="t-rotation" type="number" min="0" max="180" step="1" value="0"></label>
+            <label class="pick" title="0 = off">color jitter <input id="t-jitter" type="number" min="0" max="1" step="0.05" value="0"></label>
+            <label class="pick" title="1 = off">random crop, min scale <input id="t-crop" type="number" min="0.05" max="1" step="0.05" value="0.6"></label>
+          </div>
+        </fieldset>
+        <p class="hint" id="t-aug-hint"></p>
+      </section>
+
+      <section class="panel">
+        <button id="t-start" class="primary">Start training</button>
+        <p class="status" id="t-form-status"></p>
+      </section>
+    </div>
+
+    <section class="panel monitor" id="monitor">
+      <p class="hint" id="m-empty">Nothing is training. Fill in the form on the left and press Start training.</p>
+      <div id="m-body" hidden>
+        <div class="monitor-head">
+          <div class="monitor-title">
+            <h2 id="m-title"></h2>
+            <div class="note" id="m-description"></div>
+          </div>
+          <span class="badge" id="m-state"></span>
+          <div class="monitor-buttons">
+            <button id="m-stop-save" title="stop now and save the model as it is">Stop &amp; save</button>
+            <button id="m-stop" title="stop now, keep whatever was saved before">Stop</button>
+          </div>
+        </div>
+        <div class="monitor-progress">
+          <div class="progress-label"><span id="m-epoch-label"></span><span id="m-time"></span></div>
+          <div class="progress"><div id="m-epoch-fill"></div></div>
+          <div class="progress-label"><span id="m-stage"></span><span id="m-batch-label"></span></div>
+          <div class="progress thin"><div id="m-batch-fill"></div></div>
+        </div>
+        <p class="status error" id="m-message" hidden></p>
+        <div class="charts">
+          <figure><figcaption>loss <span class="note">(log scale)</span></figcaption><svg id="m-loss" viewBox="0 0 600 230"></svg></figure>
+          <figure id="m-acc-figure"><figcaption>accuracy</figcaption><svg id="m-acc" viewBox="0 0 600 230"></svg></figure>
+          <figure id="m-parts-figure"><figcaption>last epoch</figcaption><table id="m-parts"></table></figure>
+        </div>
+        <h2 id="m-preview-title">Preview</h2>
+        <div id="m-preview"></div>
+        <div id="m-misclassified-block" hidden>
+          <h2>Most misclassified <span class="note">(evaluation images, worst first: lowest score for their true class)</span></h2>
+          <div id="m-misclassified"></div>
+        </div>
+        <div id="m-confusion-block" hidden>
+          <h2>Confusion <span class="note">(evaluation images: rows = true class, columns = predicted)</span></h2>
+          <div id="m-confusion"></div>
+        </div>
+        <h2>Log</h2>
+        <pre id="m-log"></pre>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-data" class="train" hidden>
+    <div class="side">
+      <div class="segmented side-tabs" id="d-mode">
+        <button data-mode="converter" class="active">Converter</button>
+        <button data-mode="audio">Audio</button>
+      </div>
+
+      <div id="d-audio" class="side" hidden>
+        <section class="panel">
+          <h2>Sound file</h2>
+          <div class="toolbar column">
+            <input id="a-file" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*">
+            <p class="hint" id="a-file-info">A wav or mp3 from your computer. It is uploaded to the server once, then previewed and cut there.</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Fragments</h2>
+          <div class="toolbar column">
+            <label class="pick">duration (s) <input id="a-duration" type="number" min="0.05" max="60" step="0.05" value="1"></label>
+            <label class="pick">overlap (%) <input id="a-overlap" type="number" min="0" max="95" step="5" value="25"></label>
+            <label class="pick">sample rate (Hz)
+              <select id="a-sample-rate"><option>16000</option><option selected>22050</option><option>44100</option></select>
+            </label>
+          </div>
+          <p class="hint" id="a-fragments-info"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Spectrogram</h2>
+          <div class="toolbar column">
+            <label class="pick">resolution (px) <input id="a-resolution" type="number" min="16" max="1024" step="16" value="256"></label>
+            <label class="pick">frequency scale
+              <select id="a-scale"><option value="mel">mel (as we hear pitch)</option><option value="linear">linear (Hz)</option></select>
+            </label>
+            <label class="pick">brightness
+              <select id="a-normalization">
+                <option value="fragment">per fragment</option>
+                <option value="clip">against the whole clip</option>
+              </select>
+            </label>
+            <label class="pick" title="this many decibels below the loudest point are black">dynamic range (dB) <input id="a-dynamic" type="number" min="10" max="150" step="5" value="80"></label>
+          </div>
+          <p class="hint" id="a-normalization-hint"></p>
+        </section>
+
+        <section class="panel">
+          <h2>New dataset</h2>
+          <div class="toolbar column">
+            <label class="pick">name <input id="a-name" type="text" spellcheck="false" placeholder="birds_spectrograms"></label>
+            <p class="hint" id="a-name-info"></p>
+            <label class="pick">fragment sound
+              <select id="a-format"><option value="wav">wav</option><option value="mp3">mp3 (smaller)</option></select>
+            </label>
+          </div>
+          <p class="hint">Every fragment is saved as fragment_00012.png (its spectrogram) and fragment_00012.wav (its sound). On the Embedding Map, clicking such an image plays its sound.</p>
+        </section>
+
+        <section class="panel">
+          <button id="a-start" class="primary">Make spectrograms</button>
+          <p class="status" id="a-form-status"></p>
+        </section>
+      </div>
+
+      <div id="d-converter" class="side">
+      <section class="panel">
+        <h2>Source</h2>
+        <div class="toolbar column">
+          <label class="pick">dataset <select id="d-source"></select></label>
+          <p class="hint" id="d-source-info"></p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Conversion</h2>
+        <div class="toolbar column">
+          <label class="pick">conversion <select id="d-conversion"></select></label>
+          <div id="d-params" class="toolbar column"></div>
+        </div>
+        <p class="hint" id="d-conversion-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>New dataset</h2>
+        <div class="toolbar column">
+          <label class="pick">name <input id="d-name" type="text" spellcheck="false" placeholder="baroque_depth"></label>
+          <p class="hint" id="d-name-info"></p>
+          <label class="pick">format
+            <select id="d-format">
+              <option value="png">png</option>
+              <option value="jpg">jpg</option>
+              <option value="same">as the source</option>
+            </select>
+          </label>
+          <label class="pick" title="0 = keep every image's size">max side (px) <input id="d-max-side" type="number" min="0" step="64" value="0"></label>
+        </div>
+        <p class="hint">The new folder is created in the datasets folder, with the same subfolders and file names as the source.</p>
+      </section>
+
+      <section class="panel">
+        <button id="d-start" class="primary">Convert</button>
+        <p class="status" id="d-form-status"></p>
+      </section>
+      </div>
+    </div>
+
+    <section class="panel monitor">
+      <div id="d-job" hidden>
+        <div class="monitor-head">
+          <div class="monitor-title">
+            <h2 id="d-job-title"></h2>
+            <div class="note" id="d-job-target"></div>
+          </div>
+          <span class="badge" id="d-job-state"></span>
+          <div class="monitor-buttons">
+            <button id="d-open" hidden>Open in Embedding Map</button>
+            <button id="d-stop">Stop</button>
+          </div>
+        </div>
+        <div class="monitor-progress">
+          <div class="progress-label"><span id="d-job-count"></span><span id="d-job-time"></span></div>
+          <div class="progress"><div id="d-job-fill"></div></div>
+        </div>
+        <p class="status error" id="d-job-message" hidden></p>
+        <pre id="d-log"></pre>
+      </div>
+
+      <div class="monitor-head">
+        <div class="monitor-title">
+          <h2>Preview</h2>
+          <div class="note" id="d-preview-info"></div>
+        </div>
+        <div class="monitor-buttons"><button id="d-other">Other images</button><button id="a-other" hidden>Other fragments</button></div>
+      </div>
+      <div id="d-preview" class="convert-grid"></div>
+      <div id="a-preview" class="audio-grid" hidden></div>
+    </section>
+  </main>
+
+  <script src="embedding_map.js"></script>
+  <script src="training.js"></script>
+  <script src="dataset.js"></script>
+</body>
+</html>

@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Embedding Map</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-view="map" class="active" aria-selected="true">Embedding Map</button>
+      <button role="tab" data-view="train" aria-selected="false">Training</button>
+      <button role="tab" data-view="data" aria-selected="false">Dataset</button>
+    </nav>
+    <p id="tab-hint">Images placed by the vectors a model gives them, squeezed to 2D and grouped into clusters.</p>
+  </header>
+
+  <main id="view-map">
+    <div class="side">
+      <div class="segmented side-tabs" id="map-tabs">
+        <button data-tab="data" class="active">Data</button>
+        <button data-tab="projection">Projection</button>
+        <button data-tab="clustering">Clustering</button>
+        <button data-tab="display">Display</button>
+      </div>
+
+      <!-- on every tab: a change on any of them starts a new map -->
+      <section class="panel run-status">
+        <p class="status" id="status">loading…</p>
+        <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+      </section>
+
+      <section class="panel" data-tab="data">
+        <h2>Data</h2>
+        <div class="toolbar column">
+          <label class="pick">model <select id="model"></select></label>
+          <label class="pick" id="prompt-row" hidden title="what the images should be: the score is how well each fits it">prompt <input id="prompt" type="text" placeholder="an image"></label>
+          <label class="pick">dataset <select id="dataset"></select></label>
+          <label title="the images are converted to gray as they are loaded, for the model and on the map (the files aren't changed)"><input id="grayscale" type="checkbox"> grayscale</label>
+          <label class="pick" title="bigger datasets use a random sample of this many images">max images <input id="max-images" type="number" min="10" step="100" value="1000"></label>
+        </div>
+        <div class="toolbar">
+          <label title="compute a new map as soon as a setting of this tab changes (projection and clustering changes always update the map)"><input id="auto-update" type="checkbox"> auto update</label>
+          <button id="update-now" title="compute the map with the settings as they are now">Update now</button>
+          <button id="rescan" title="look for new model and dataset folders">Rescan folders</button>
+        </div>
+        <div class="toolbar">
+          <button id="add-images" title="images from this computer onto the map: they are not copied into the dataset's folder">Add images…</button>
+          <button id="restore-removed" title="every image taken off the map comes back" hidden>Restore removed</button>
+          <input id="add-file" type="file" accept=".jpg,.jpeg,.png,.bmp,.webp" multiple hidden>
+        </div>
+        <p class="hint">Added and removed images last until the server stops. The dataset's folder isn't changed.</p>
+      </section>
+
+      <section class="panel" data-tab="projection" hidden>
+        <h2>Projection</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="projection"></select></label>
+          <label class="slider" id="perplexity-row">perplexity <input id="perplexity" type="range" min="5" max="100" value="30"><output id="perplexity-out">30</output></label>
+          <label class="slider" id="neighbors-row">neighbours <input id="neighbors" type="range" min="2" max="100" value="15"><output id="neighbors-out">15</output></label>
+          <label class="pick" id="score-layout-row" hidden title="how the images are laid out by their score">layout
+            <select id="score-layout"><option value="histogram">histogram</option><option value="central">central</option></select>
+          </label>
+          <label class="pick" id="central-top-row" hidden title="which image is in the middle, the others around it from the most like it to the least">middle
+            <select id="central-top"><option value="highest">highest score</option><option value="lowest">lowest score</option></select>
+          </label>
+          <label class="pick" id="central-shape-row" hidden>shape
+            <select id="central-shape"><option value="rectangular">rectangular</option><option value="radial">radial</option></select>
+          </label>
+          <label id="radii-row" hidden title="each ring as far from the middle as its scores are from the middle image's (never closer than one image to the ring inside); off: rings one image apart"><input id="radii-by-distance" type="checkbox"> radii follow score distance</label>
+          <label id="score-fade-row" hidden title="the farther an image's score from the middle image's, the fainter it is"><input id="score-fade" type="checkbox"> fade by score distance</label>
+          <label class="pick" id="axis-mode-row" hidden title="what the images are ordered by, left to right">order by <select id="axis-mode"></select></label>
+          <label class="pick" id="axis-prompt-row" hidden title="most similar to the prompt on the right">prompt <input id="axis-prompt" type="text" placeholder="a photo of a dog"></label>
+          <div class="pick" id="axis-image-row" hidden>image
+            <button id="axis-image" class="query-image" title="most similar to this image on the right: click to choose one">choose…</button>
+            <input id="axis-image-file" type="file" accept=".jpg,.jpeg,.png,.bmp,.webp" hidden>
+          </div>
+          <label class="pick" id="axis-x-row" hidden><span id="axis-x-label">x axis</span> <select id="axis-x"></select></label>
+          <label class="pick" id="axis-y-row" hidden>y axis <select id="axis-y"></select></label>
+          <label class="pick">vectors
+            <select id="prep" title="default: the best way to compare this model's vectors; anything else overrides it"></select>
+          </label>
+          <label><input id="align" type="checkbox" checked> align with previous map</label>
+          <label><input id="quantize" type="checkbox"> quantized tiles</label>
+          <label class="slider" id="subdivisions-row" hidden>subdivisions <input id="subdivisions" type="range" min="4" max="150" value="40"><output id="subdivisions-out">40</output></label>
+          <label class="slider" id="gap-row" hidden>gap <input id="gap" type="range" min="0" max="0.6" step="0.05" value="0"><output id="gap-out">0</output></label>
+        </div>
+        <p class="hint" id="projection-hint"></p>
+
+        <!-- spring forces: all of it runs in the page (spring.js), nothing here asks the server for a new map -->
+        <div id="spring-controls" hidden>
+          <h3>Springs</h3>
+          <div class="toolbar column">
+            <label class="pick" title="how long a spring is at rest, from how similar its two images are">rest length
+              <select id="sp-length">
+                <option value="equal">equal (ignore similarity)</option>
+                <option value="inverse">inverse: L / sim</option>
+                <option value="linear" selected>linear: L × (1 − sim)</option>
+                <option value="distance">vector distance</option>
+              </select>
+            </label>
+            <label class="pick" title="which pairs of images get a spring">pairs
+              <select id="sp-pairs">
+                <option value="all">all N×N (cached)</option>
+                <option value="knn">k most similar (at start)</option>
+                <option value="dynamic" selected>tracked (found on the way)</option>
+              </select>
+            </label>
+            <label class="slider" id="sp-k-row" title="springs to this many of the most similar images">neighbours <input id="sp-k" type="range" min="1" max="50" value="10"><output id="sp-k-out"></output></label>
+            <label class="slider" id="sp-m-row" title="every step, each image also gets springs to this many images picked at random">random / step <input id="sp-m" type="range" min="0" max="30" value="4"><output id="sp-m-out"></output></label>
+            <label class="slider" id="sp-weight-row" title="strength of the random springs, relative to the neighbours'">random weight <input id="sp-weight" type="range" min="0" max="1" step="0.05" value="0.3"><output id="sp-weight-out"></output></label>
+            <label class="pick" id="sp-tests-row" title="pairs compared between two frames, only to find more similar neighbours">tests / frame <input id="sp-tests" type="number" min="0" step="500" value="2000"></label>
+            <label class="slider" title="rest length L, in map widths">length <input id="sp-l" type="range" min="0.01" max="1" step="0.01" value="0.3"><output id="sp-l-out"></output></label>
+            <label class="slider" title="shortest rest length of any spring, in map widths: similar images keep this far apart">spacing <input id="sp-spacing" type="range" min="0" max="0.1" step="0.002" value="0.03"><output id="sp-spacing-out"></output></label>
+            <label class="slider" title="pairs less similar than this push each other away instead of being held by a spring (−1: springs only)">cutoff <input id="sp-cutoff" type="range" min="-1" max="1" step="0.05" value="0.2"><output id="sp-cutoff-out"></output></label>
+            <label class="slider" title="similarity range over which the spring fades into the push">transition <input id="sp-transition" type="range" min="0.02" max="1" step="0.02" value="0.3"><output id="sp-transition-out"></output></label>
+            <label class="slider" title="push between unrelated images when they touch (0: none)">repulsion <input id="sp-repulsion" type="range" min="0" max="1" step="0.01" value="0.1"><output id="sp-repulsion-out"></output></label>
+            <label class="slider" title="distance over which the push fades (like 1/d² beyond it), in map widths">reach <input id="sp-reach" type="range" min="0.01" max="1" step="0.01" value="0.15"><output id="sp-reach-out"></output></label>
+            <label class="slider">stiffness <input id="sp-stiffness" type="range" min="0" max="2" step="0.01" value="0.5"><output id="sp-stiffness-out"></output></label>
+            <label class="slider" title="fraction of the speed lost every step">damping <input id="sp-damping" type="range" min="0" max="1" step="0.01" value="0.2"><output id="sp-damping-out"></output></label>
+            <label class="slider" title="time step">dt <input id="sp-dt" type="range" min="0.01" max="1" step="0.01" value="0.3"><output id="sp-dt-out"></output></label>
+            <label class="slider">steps / frame <input id="sp-steps" type="range" min="1" max="20" value="1"><output id="sp-steps-out"></output></label>
+            <label class="slider" title="pull toward the middle of the map">gravity <input id="sp-gravity" type="range" min="0" max="0.2" step="0.005" value="0.01"><output id="sp-gravity-out"></output></label>
+            <label><input id="sp-pin-drop" type="checkbox" checked> pin where dropped</label>
+            <label title="a line from every image to its most similar partners among its springs"><input id="sp-lines" type="checkbox"> pair lines</label>
+            <label class="slider" id="sp-lines-n-row" hidden>lines / image <input id="sp-lines-n" type="range" min="1" max="20" value="3"><output id="sp-lines-n-out"></output></label>
+            <label class="pick" id="sp-lines-color-row" hidden>line color <input id="sp-lines-color" type="color" value="#2a78d6"></label>
+          </div>
+          <div class="toolbar">
+            <button id="sp-run">Pause</button>
+            <button id="sp-shake" title="push every image that isn't pinned in a random direction">Shake</button>
+            <button id="sp-pin" title="P: pin / unpin the selected image" disabled>Pin selected</button>
+            <button id="sp-unpin" disabled>Unpin all</button>
+          </div>
+          <p class="hint" id="sp-info"></p>
+          <p class="hint">P pins the selected image where it is. Drag images around while it runs.</p>
+        </div>
+      </section>
+
+      <section class="panel" data-tab="clustering" hidden>
+        <h2>Clustering</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="clustering"></select></label>
+          <label class="pick">on
+            <select id="cluster-on">
+              <option value="embedding">the vectors</option>
+              <option value="map">the 2D map</option>
+            </select>
+          </label>
+          <label class="slider" id="k-row">clusters <input id="k" type="range" min="2" max="30" value="8"><output id="k-out">8</output></label>
+          <label class="pick" id="eps-row">eps <input id="eps" type="number" min="0.001" step="0.01" value="0.5"></label>
+          <label class="pick" id="min-samples-row">min samples <input id="min-samples" type="number" min="1" step="1" value="5"></label>
+        </div>
+        <p class="hint" id="cluster-hint"></p>
+        <div id="legend"></div>
+      </section>
+
+      <section class="panel" id="interp-panel" hidden>
+        <h2>Interpolation</h2>
+        <div class="pick-pair">
+          <button class="pick" id="pick-a" title="click, then click an image on the map"><img alt="" hidden><span>A</span></button>
+          <span class="arrow">→</span>
+          <button class="pick" id="pick-b" title="click, then click an image on the map"><img alt="" hidden><span>B</span></button>
+        </div>
+        <div class="toolbar">
+          <label class="pick">steps <input id="interp-steps" type="number" min="1" max="100" step="1" value="8"></label>
+          <button id="interp-clear">Clear</button>
+        </div>
+        <p class="hint" id="interp-hint">Click A or B, then an image on the map. The codes in between are decoded, encoded again and placed among their nearest images.</p>
+        <div id="interp-anim" hidden>
+          <img id="interp-frame" alt="interpolation, animated" title="click: pause / play">
+          <div class="anim-bar">
+            <span id="interp-frame-label"></span>
+            <label class="slider">speed <input id="interp-fps" type="range" min="1" max="30" value="8"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" data-tab="display" hidden>
+        <h2>Display</h2>
+        <div class="toolbar column">
+          <label class="pick" title="HTML: one element per image. three.js: drawn in WebGL, lighter with many images">renderer
+            <select id="renderer">
+              <option value="html">HTML elements</option>
+              <option value="three">three.js (WebGL)</option>
+            </select>
+          </label>
+          <label><input id="thumbnails" type="checkbox" checked> thumbnails <span class="note">(off: dots)</span></label>
+          <label><input id="borders" type="checkbox" checked> borders <span class="note">(cluster colors)</span></label>
+          <label class="slider">size <input id="item-size" type="range" min="6" max="120" value="40"></label>
+          <label class="pick">background <input id="map-bg" type="color" value="#ececec"></label>
+        </div>
+        <p class="hint">Scroll to zoom, drag to pan, double-click to reset.</p>
+        <div class="toolbar">
+          <button id="export-pdf" title="save the map as it is shown now (zoom, pan, highlighted cluster...) as a PDF">Export PDF</button>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel map-panel">
+      <div id="map">
+        <svg id="pair-lines"><path></path></svg>
+        <div id="items"></div>
+        <svg id="interp-line"><polyline></polyline></svg>
+        <div id="interp-items"></div>
+        <div id="empty">pick a model and a dataset</div>
+      </div>
+    </section>
+
+    <section class="panel info" id="info">
+      <h2>Image</h2>
+      <p class="hint" id="info-empty">Hover an image on the map, click to select it.</p>
+      <div id="info-body" hidden>
+        <div class="pair">
+          <figure><img id="info-image" alt=""><figcaption>image</figcaption></figure>
+          <figure id="info-recon-figure"><img id="info-recon" alt=""><figcaption>reconstruction</figcaption></figure>
+        </div>
+        <div id="info-name"></div>
+        <div id="info-cluster"></div>
+        <div class="toolbar" id="info-actions" hidden>
+          <button id="info-remove" title="Delete: take the selected image off the map (its file stays) and make the map again">Remove from map</button>
+        </div>
+        <canvas id="barcode" width="600" height="60"></canvas>
+        <div class="barcode-scale"><span>−2σ</span><span id="barcode-label">vector vs. dataset mean</span><span>+2σ</span></div>
+        <label><input id="barcode-raw" type="checkbox"> raw values</label>
+        <div id="info-classes" hidden></div>
+        <audio id="info-audio" controls preload="none" hidden></audio>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-train" class="train" hidden>
+    <div class="side">
+      <section class="panel">
+        <h2>New training</h2>
+        <div class="segmented" id="t-kind">
+          <button data-kind="autoencoder" class="active">Autoencoder</button>
+          <button data-kind="classifier">Classifier</button>
+          <button data-kind="ranknet">RankNet</button>
+        </div>
+        <div class="toolbar column">
+          <label class="pick">name <input id="t-name" type="text" placeholder="my_model" spellcheck="false"></label>
+          <p class="hint" id="t-name-info"></p>
+          <label><input id="t-continue" type="checkbox"> continue training if it exists</label>
+          <label class="pick">dataset <select id="t-dataset"></select></label>
+          <p class="hint" id="t-dataset-info"></p>
+          <label class="pick" id="t-ranking-row" hidden>ranking <select id="t-ranking"></select></label>
+          <p class="hint" id="t-ranking-info" hidden></p>
+        </div>
+      </section>
+
+      <section class="panel" id="t-ae">
+        <h2>Autoencoder</h2>
+        <fieldset id="t-ae-fields">
+          <div class="toolbar column">
+            <label class="pick">type <select id="t-ae-type"></select></label>
+            <label class="pick">image size <input id="t-image-size" type="number" min="16" step="16" value="64"></label>
+            <label class="pick">latent size <input id="t-latent" type="number" min="2" step="1" value="128"></label>
+            <div id="t-ae-options" class="toolbar column"></div>
+          </div>
+        </fieldset>
+        <p class="hint" id="t-ae-hint"></p>
+      </section>
+
+      <section class="panel" id="t-clf" hidden>
+        <h2>Classifier</h2>
+        <fieldset id="t-clf-fields">
+          <div class="toolbar column">
+            <label class="pick">backbone <select id="t-backbone"></select></label>
+            <label class="pick">head
+              <select id="t-head"><option value="linear">linear</option><option value="mlp">mlp</option></select>
+            </label>
+            <label class="pick" id="t-hidden-row">hidden size <input id="t-hidden" type="number" min="8" step="8" value="512"></label>
+          </div>
+        </fieldset>
+        <div class="toolbar column">
+          <label class="pick" id="t-dropout-row">dropout <input id="t-dropout" type="number" min="0" max="0.9" step="0.05" value="0.2"></label>
+          <label><input id="t-freeze" type="checkbox" checked> freeze backbone <span class="note">(off: fine-tune)</span></label>
+          <label class="pick" id="t-bblr-row">backbone lr × <input id="t-bblr" type="number" min="0" step="0.05" value="0.1"></label>
+        </div>
+        <p class="hint" id="t-clf-hint"></p>
+      </section>
+
+      <section class="panel" id="t-rn" hidden>
+        <h2>RankNet</h2>
+        <fieldset id="t-rn-fields">
+          <div class="toolbar column">
+            <div class="checklist" id="t-rn-backbones" title="several: their embeddings are concatenated"></div>
+            <label class="pick">hidden size <input id="t-rn-hidden" type="number" min="8" step="8" value="128"></label>
+            <label class="pick">dropout <input id="t-rn-dropout" type="number" min="0" max="0.9" step="0.05" value="0.3"></label>
+          </div>
+        </fieldset>
+        <div class="toolbar column">
+          <label class="pick" title="pulls the weights towards 0: less overfitting on few pairs">weight decay <input id="t-rn-wd" type="number" min="0" step="any" value="0.001"></label>
+        </div>
+        <p class="hint">A score per image, learned from the pairs of the ranking file. The backbones are frozen: every image is embedded once, then only the small head (hidden size → 64 → 1) learns, in seconds. The pairs, not the images, are split into training and evaluation.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Training</h2>
+        <div class="toolbar column">
+          <label class="pick">epochs <input id="t-epochs" type="number" min="1" step="1" value="50"></label>
+          <label class="pick">learning rate <input id="t-lr" type="number" min="0" step="any" value="0.001"></label>
+          <label class="pick">batch size <input id="t-batch" type="number" min="1" step="1" value="64"></label>
+          <label class="pick">evaluation % <input id="t-eval" type="number" min="0" max="90" step="1" value="10"></label>
+          <label class="pick" title="0: only after the last epoch">save every <input id="t-save-every" type="number" min="0" step="1" value="10"></label>
+        </div>
+      </section>
+
+      <section class="panel" id="t-aug-panel">
+        <h2>Augmentation</h2>
+        <div class="toolbar column">
+          <label><input id="t-augment" type="checkbox" checked> augment the training images</label>
+        </div>
+        <fieldset id="t-aug-fields">
+          <div class="toolbar column">
+            <label><input id="t-flip" type="checkbox" checked> random horizontal flip</label>
+            <label class="pick" title="0 = off">rotation ± degrees <input id="t-rotation" type="number" min="0" max="180" step="1" value="0"></label>
+            <label class="pick" title="0 = off">color jitter <input id="t-jitter" type="number" min="0" max="1" step="0.05" value="0"></label>
+            <label class="pick" title="1 = off">random crop, min scale <input id="t-crop" type="number" min="0.05" max="1" step="0.05" value="0.6"></label>
+          </div>
+        </fieldset>
+        <p class="hint" id="t-aug-hint"></p>
+      </section>
+
+      <section class="panel">
+        <button id="t-start" class="primary">Start training</button>
+        <p class="status" id="t-form-status"></p>
+      </section>
+    </div>
+
+    <section class="panel monitor" id="monitor">
+      <p class="hint" id="m-empty">Nothing is training. Fill in the form on the left and press Start training.</p>
+      <div id="m-body" hidden>
+        <div class="monitor-head">
+          <div class="monitor-title">
+            <h2 id="m-title"></h2>
+            <div class="note" id="m-description"></div>
+          </div>
+          <span class="badge" id="m-state"></span>
+          <div class="monitor-buttons">
+            <button id="m-stop-save" title="stop now and save the model as it is">Stop &amp; save</button>
+            <button id="m-stop" title="stop now, keep whatever was saved before">Stop</button>
+          </div>
+        </div>
+        <div class="monitor-progress">
+          <div class="progress-label"><span id="m-epoch-label"></span><span id="m-time"></span></div>
+          <div class="progress"><div id="m-epoch-fill"></div></div>
+          <div class="progress-label"><span id="m-stage"></span><span id="m-batch-label"></span></div>
+          <div class="progress thin"><div id="m-batch-fill"></div></div>
+        </div>
+        <p class="status error" id="m-message" hidden></p>
+        <div class="charts">
+          <figure><figcaption>loss <span class="note">(log scale)</span></figcaption><svg id="m-loss" viewBox="0 0 600 230"></svg></figure>
+          <figure id="m-acc-figure"><figcaption id="m-acc-caption">accuracy</figcaption><svg id="m-acc" viewBox="0 0 600 230"></svg></figure>
+          <figure id="m-parts-figure"><figcaption>last epoch</figcaption><table id="m-parts"></table></figure>
+        </div>
+        <h2 id="m-preview-title">Preview</h2>
+        <div id="m-preview"></div>
+        <div id="m-misclassified-block" hidden>
+          <h2>Most misclassified <span class="note">(evaluation images, worst first: lowest score for their true class)</span></h2>
+          <div id="m-misclassified"></div>
+        </div>
+        <div id="m-confusion-block" hidden>
+          <h2>Confusion <span class="note">(evaluation images: rows = true class, columns = predicted)</span></h2>
+          <div id="m-confusion"></div>
+        </div>
+        <h2>Log</h2>
+        <pre id="m-log"></pre>
+      </div>
+    </section>
+  </main>
+
+  <main id="view-data" class="train" hidden>
+    <div class="side">
+      <div class="segmented side-tabs" id="d-mode">
+        <button data-mode="converter" class="active">Converter</button>
+        <button data-mode="audio">Audio</button>
+        <button data-mode="sampler">Sampler</button>
+        <button data-mode="ranking">Ranking</button>
+      </div>
+
+      <div id="d-sampler" class="side" hidden>
+        <section class="panel">
+          <h2>Source</h2>
+          <div class="toolbar column">
+            <label class="pick">dataset <select id="s-source"></select></label>
+            <p class="hint" id="s-source-info"></p>
+            <label class="pick" title="the images are clustered by this model's vectors: use the one the RankNet will use">model <select id="s-model"></select></label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Selection</h2>
+          <div class="toolbar column">
+            <label class="pick">images <input id="s-count" type="number" min="1" step="10" value="200"></label>
+            <label class="pick">clusters <input id="s-clusters" type="number" min="1" step="1" value="50"></label>
+            <p class="hint" id="s-ratio"></p>
+            <label class="pick" title="two images more alike than this (cosine) count as the same picture: one is left out. 1 = off">duplicates above <input id="s-dedup" type="number" min="0.5" max="1" step="0.01" value="0.95"></label>
+            <label class="pick">group by <select id="s-group-by"></select></label>
+            <label class="pick" id="s-group-cap-row" title="0 = no limit">at most per group <input id="s-group-cap" type="number" min="0" step="1" value="2"></label>
+            <label class="pick" title="the same seed gives the same selection">seed <input id="s-seed" type="number" min="0" step="1" value="0"></label>
+          </div>
+          <p class="hint">Clusters by the model's vectors, then takes from every cluster its most typical image and the ones most different from it. Near-duplicates are left out, and a group cap keeps one author or folder from filling the selection.</p>
+        </section>
+
+        <section class="panel">
+          <h2>New dataset</h2>
+          <div class="toolbar column">
+            <label class="pick">name <input id="s-name" type="text" spellcheck="false" placeholder="wikiart_sample_200"></label>
+            <p class="hint" id="s-name-info"></p>
+            <label class="pick" title="0 = keep">max side (px) <input id="s-max-side" type="number" min="0" step="64" value="512"></label>
+            <label class="pick" title="0 = keep: a panorama doesn't become a thin strip">max short side (px) <input id="s-max-short" type="number" min="0" step="50" value="300"></label>
+          </div>
+          <p class="hint">JPEGs named 00000_&lt;name&gt;.jpg in cluster order, and taste_manifest.json with where each came from and its cluster (the Ranking page uses it for pairs of alike images).</p>
+        </section>
+
+        <section class="panel">
+          <button id="s-start" class="primary">Sample</button>
+          <p class="status" id="s-form-status"></p>
+        </section>
+      </div>
+
+      <div id="d-ranking" class="side" hidden>
+        <section class="panel">
+          <h2>Dataset</h2>
+          <div class="toolbar column">
+            <label class="pick">dataset <select id="r-dataset"></select></label>
+            <p class="hint" id="r-dataset-info"></p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Ranking file</h2>
+          <div class="toolbar column">
+            <label class="pick">ranking <select id="r-file"></select></label>
+            <p class="hint" id="r-file-info"></p>
+            <div id="r-new" class="toolbar column" hidden>
+              <label class="pick">name <input id="r-name" type="text" spellcheck="false" placeholder="pan"></label>
+              <label class="pick">question <input id="r-question" type="text" placeholder="which one is better?"></label>
+            </div>
+          </div>
+          <p class="hint">Saved as ranking_&lt;name&gt;.json in the dataset's folder. One per person or question: a RankNet trains on one of them.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Pairs</h2>
+          <div class="toolbar column">
+            <label class="pick">choose <select id="r-strategy">
+              <option value="mixed">mixed</option>
+              <option value="random">random</option>
+              <option value="similar">similar images</option>
+              <option value="ranking">close in a ranking</option>
+            </select></label>
+            <label class="pick" id="r-similar-row" title="alike = same cluster of this model's vectors">alike by <select id="r-similar"></select></label>
+            <label class="pick" id="r-ranked-row" title="a RankNet or an aesthetic score">ranking by <select id="r-ranked"></select></label>
+            <label class="pick" id="r-ranked-prompt-row" hidden>prompt <input id="r-ranked-prompt" type="text" placeholder="an image"></label>
+            <p class="hint" id="r-strategy-info"></p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <button id="r-start" class="primary">Rank</button>
+          <p class="status" id="r-form-status"></p>
+        </section>
+      </div>
+
+      <div id="d-audio" class="side" hidden>
+        <section class="panel">
+          <h2>Sound file</h2>
+          <div class="toolbar column">
+            <input id="a-file" type="file" accept=".wav,.mp3,.ogg,.flac,audio/*">
+            <p class="hint" id="a-file-info">A wav or mp3 from your computer. It is uploaded to the server once, then previewed and cut there.</p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Fragments</h2>
+          <div class="toolbar column">
+            <label class="pick">duration (s) <input id="a-duration" type="number" min="0.05" max="60" step="0.05" value="1"></label>
+            <label class="pick">overlap (%) <input id="a-overlap" type="number" min="0" max="95" step="5" value="25"></label>
+            <label class="pick">sample rate (Hz)
+              <select id="a-sample-rate"><option>16000</option><option selected>22050</option><option>44100</option></select>
+            </label>
+          </div>
+          <p class="hint" id="a-fragments-info"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Spectrogram</h2>
+          <div class="toolbar column">
+            <label class="pick">resolution (px) <input id="a-resolution" type="number" min="16" max="1024" step="16" value="256"></label>
+            <label class="pick">frequency scale
+              <select id="a-scale"><option value="mel">mel (as we hear pitch)</option><option value="linear">linear (Hz)</option></select>
+            </label>
+            <label class="pick">brightness
+              <select id="a-normalization">
+                <option value="fragment">per fragment</option>
+                <option value="clip">against the whole clip</option>
+              </select>
+            </label>
+            <label class="pick" title="this many decibels below the loudest point are black">dynamic range (dB) <input id="a-dynamic" type="number" min="10" max="150" step="5" value="80"></label>
+          </div>
+          <p class="hint" id="a-normalization-hint"></p>
+        </section>
+
+        <section class="panel">
+          <h2>New dataset</h2>
+          <div class="toolbar column">
+            <label class="pick">name <input id="a-name" type="text" spellcheck="false" placeholder="birds_spectrograms"></label>
+            <p class="hint" id="a-name-info"></p>
+            <label class="pick">fragment sound
+              <select id="a-format"><option value="wav">wav</option><option value="mp3">mp3 (smaller)</option></select>
+            </label>
+          </div>
+          <p class="hint">Every fragment is saved as fragment_00012.png (its spectrogram) and fragment_00012.wav (its sound). On the Embedding Map, clicking such an image plays its sound.</p>
+        </section>
+
+        <section class="panel">
+          <button id="a-start" class="primary">Make spectrograms</button>
+          <p class="status" id="a-form-status"></p>
+        </section>
+      </div>
+
+      <div id="d-converter" class="side">
+      <section class="panel">
+        <h2>Source</h2>
+        <div class="toolbar column">
+          <label class="pick">dataset <select id="d-source"></select></label>
+          <p class="hint" id="d-source-info"></p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Conversion</h2>
+        <div class="toolbar column">
+          <label class="pick">conversion <select id="d-conversion"></select></label>
+          <div id="d-params" class="toolbar column"></div>
+        </div>
+        <p class="hint" id="d-conversion-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>New dataset</h2>
+        <div class="toolbar column">
+          <label class="pick">name <input id="d-name" type="text" spellcheck="false" placeholder="baroque_depth"></label>
+          <p class="hint" id="d-name-info"></p>
+          <label class="pick">format
+            <select id="d-format">
+              <option value="png">png</option>
+              <option value="jpg">jpg</option>
+              <option value="same">as the source</option>
+            </select>
+          </label>
+          <label class="pick" title="0 = keep every image's size">max side (px) <input id="d-max-side" type="number" min="0" step="64" value="0"></label>
+        </div>
+        <p class="hint">The new folder is created in the datasets folder, with the same subfolders and file names as the source.</p>
+      </section>
+
+      <section class="panel">
+        <button id="d-start" class="primary">Convert</button>
+        <p class="status" id="d-form-status"></p>
+      </section>
+      </div>
+    </div>
+
+    <section class="panel monitor">
+      <div id="r-board" hidden>
+        <p class="hint" id="r-empty">Pick a dataset and a ranking file (or a new one) on the left, then press Rank.</p>
+        <div id="r-session" hidden>
+          <div class="monitor-head">
+            <div class="monitor-title">
+              <h2 id="r-title"></h2>
+              <div class="note" id="r-counts"></div>
+            </div>
+            <span class="badge" id="r-saved"></span>
+            <div class="monitor-buttons">
+              <button id="r-undo" title="Backspace">Undo</button>
+              <button id="r-done">Save &amp; close</button>
+            </div>
+          </div>
+          <p class="question" id="r-ask"></p>
+          <div class="duel">
+            <button class="duel-image" id="r-left" title="left is better (←)"><img alt="left image"></button>
+            <button class="duel-image" id="r-right" title="right is better (→)"><img alt="right image"></button>
+          </div>
+          <div class="duel-buttons">
+            <button id="r-pick-left">← left is better</button>
+            <button id="r-pick-equal">↓ about the same</button>
+            <button id="r-pick-right">right is better →</button>
+            <button id="r-skip" title="S: not now, ask another pair">skip</button>
+          </div>
+          <p class="hint" id="r-hint">Keys: ← → for the better one, ↓ about the same, S skip, Backspace undo. Now and then a pair you answered before comes back, to measure how consistent the answers are.</p>
+        </div>
+      </div>
+
+      <div id="d-monitor">
+      <div id="d-job" hidden>
+        <div class="monitor-head">
+          <div class="monitor-title">
+            <h2 id="d-job-title"></h2>
+            <div class="note" id="d-job-target"></div>
+          </div>
+          <span class="badge" id="d-job-state"></span>
+          <div class="monitor-buttons">
+            <button id="d-open" hidden>Open in Embedding Map</button>
+            <button id="d-stop">Stop</button>
+          </div>
+        </div>
+        <div class="monitor-progress">
+          <div class="progress-label"><span id="d-job-count"></span><span id="d-job-time"></span></div>
+          <div class="progress"><div id="d-job-fill"></div></div>
+        </div>
+        <p class="status error" id="d-job-message" hidden></p>
+        <pre id="d-log"></pre>
+      </div>
+
+      <div class="monitor-head" id="d-preview-head">
+        <div class="monitor-title">
+          <h2>Preview</h2>
+          <div class="note" id="d-preview-info"></div>
+        </div>
+        <div class="monitor-buttons"><button id="d-other">Other images</button><button id="a-other" hidden>Other fragments</button></div>
+      </div>
+      <div id="d-preview" class="convert-grid"></div>
+      <div id="a-preview" class="audio-grid" hidden></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="embedding_map.js"></script>
+  <script src="spring.js"></script>
+  <script src="training.js"></script>
+  <script src="dataset.js"></script>
+  <script src="ranking.js"></script>
+  <script src="sampler.js"></script>
+</body>
+</html>

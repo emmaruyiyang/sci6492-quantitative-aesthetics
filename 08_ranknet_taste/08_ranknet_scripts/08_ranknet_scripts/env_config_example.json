@@ -1,0 +1,7 @@
+{
+    "root_model_folder": "C:/path/to/models",
+    "root_datasets_folder": "C:/path/to/datasets",
+    "additional_dataset_folders": ["C:/path/to/more/datasets"],
+    "default_results_folder": "C:/path/to/results",
+    "hf_token": ""
+}

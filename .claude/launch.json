@@ -1,0 +1,54 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "autoencoder-app",
+      "runtimeExecutable": "/Users/ruyiyang/.local/bin/uv",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "06_autoencoders/autoencoder_app_v2",
+        "--env-file",
+        "06_autoencoders/autoencoder_app_v2/.env",
+        "python",
+        "06_autoencoders/autoencoder_app_v2/06_autoencoders/app_server.py"
+      ],
+      "port": 5002
+    },
+    {
+      "name": "relief-viewer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "06_autoencoders/web3d/capture_server.py",
+        "5173"
+      ],
+      "port": 5173,
+      "url": "http://localhost:5173"
+    },
+    {
+      "name": "ranknet-app",
+      "runtimeExecutable": "/Users/ruyiyang/.local/bin/uv",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "08_ranknet_taste/08_ranknet_scripts",
+        "--env-file",
+        "06_autoencoders/autoencoder_app_v2/.env",
+        "python",
+        "08_ranknet_taste/08_ranknet_scripts/08_ranknet_scripts/app.py"
+      ],
+      "port": 5002
+    },
+    {
+      "name": "scaleviz",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "final_project/scaleviz"
+      ],
+      "port": 5273
+    }
+  ]
+}

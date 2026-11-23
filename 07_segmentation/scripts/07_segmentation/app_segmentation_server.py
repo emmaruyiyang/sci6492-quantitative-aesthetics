@@ -1,0 +1,1122 @@
+"""Segmentation Explorer (web/segment.html): where in an image does a model
+see something? Every method turns one image into one or more maps, gray
+values over the image (fuzzy masks), and, where the maps compete (classes,
+prompts, clusters), into a segmentation: every pixel goes to the map that is
+highest there.
+
+    image  ->  model  ->  maps [T, h, w]  ->  drawn over the image
+                                          ->  argmax: segmentation
+
+No embedding map, no clusters of tiles (that is app_tiles_server.py).
+
+Prompts: what to look for, given in the page.
+
+  text    (CLIP, CLIPSeg) words, "a photo of a ..." around them (optional)
+  image   reference images: "where is something like this?"
+  point   (DINOv2, CLIP, similarity only) a point clicked on the image: the
+          patch there is the prompt, "where else is something like this?"
+  none    the whole image is the prompt: "what is typical of this image?"
+
+Methods (which ones a model offers depends on its family, see segmenters.py):
+
+  similarity  (DINOv2, CLIP) one vector per patch, compared (cosine) with
+              every prompt. A reference image counts as its summary vector
+              ([CLS]) or as its patches: every patch then takes its
+              similarity to the best-matching patch of the reference.
+  classes     (classifier) the head applied to every patch's vector instead
+              of only to the image's summary: one probability map per class.
+              The head was trained on the summary, not on patches, so this
+              is an approximation (for ResNet it is the classic Class
+              Activation Map, CAM).
+  window      (any model with one vector per image) a window slides over the
+              image, every position is scored as an image of its own
+              (classes, similarity to the prompts), and the scores are
+              spread back over the window's pixels, more in its center.
+              Autoencoders also give their reconstruction error: where the
+              image is unlike what they were trained on.
+  occlusion   a gray square slides over the image and hides what is under
+              it: how much does the score drop? (Zeiler & Fergus 2014)
+              Autoencoders: how much does the latent vector change.
+  gradients   integrated gradients (Sundararajan et al. 2017): how much
+              every pixel adds to the score, summed along a path from a
+              baseline (blurred, black or gray image) to the image.
+  attention   (DINOv2, CLIP) where the [CLS] token of the last layer looks,
+              one map per attention head
+  pca         (DINOv2, CLIP, classifiers) the 3 directions along which the
+              patch vectors vary most, as red, green, blue
+  kmeans      (DINOv2, CLIP, classifiers) the patch vectors in k groups,
+              each patch's similarity to every group's center as a soft mask
+  segformer   (SegFormer) a model trained for this: one probability per class
+              per pixel (ADE20K: 150 classes of things and stuff)
+  clipseg     (CLIPSeg) a model trained to draw a mask for a prompt, text or
+              reference image
+
+When the maps compete, "compete" turns their values into probabilities
+(softmax over the maps, sharper with a lower temperature): each pixel's
+values then add up to 1 over the maps.
+
+3D model mode: the page reads a Rhino file (/api/scene/model, scene3d.py),
+renders it with three.js from N cameras around it and uploads the frames as
+one set (/api/scene/frames). Any frame can be explored like an image. A sweep
+(/api/sweep) runs the current method on every frame and returns, per frame
+and per map (class, prompt...), its mean, its maximum and the share of the
+segmentation it wins: which views show the most of each. Points picked on
+one frame are prompts for all of them: the patch vectors under the points
+are looked for in every frame. Save frustum (/api/export/frustum) writes a
+frame's camera and a mask as a Rhino file, Save all frustums
+(/api/export/frustums) every frame's; Save colored model (/api/export/model)
+writes the model's meshes with the colors the page projected onto their
+vertices, from one view or averaged over all of them.
+
+Run it and open http://127.0.0.1:5005 (three.js comes from a CDN: the page
+needs the internet for the 3D mode)
+"""
+
+import base64
+import io
+import itertools
+import math
+import os
+import re
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from PIL import Image, ImageFilter, ImageOps
+from torchvision.transforms import functional as TF
+
+import scene3d
+from segmenters import dense_size, find_models, load_model, to_numpy
+
+HERE = Path(__file__).resolve().parent
+WEB = HERE / "web"
+
+# QA2026_DEVICE=cpu falls back to the CPU if something does not run on Apple's MPS.
+def _pick_device():
+    forced = os.environ.get("QA2026_DEVICE")
+    if forced:
+        return torch.device(forced)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+DEVICE = _pick_device()
+
+ROOT_MODEL_FOLDER = os.environ.get(
+    "QA2026_MODELS",
+    str(Path(__file__).resolve().parents[3] / "05_classifiers" / "models"))
+DEFAULT_MODEL = "pretrained/clip_b32_datacomp"
+
+MAX_SIDE = 4096             # bigger uploads are scaled down to this longest side
+KEEP_IMAGES = 12            # uploaded images kept in memory (the image and the reference images)
+KEEP_SCENES = 2             # sets of rendered frames kept in memory (they don't count as images)
+KEEP_SWEEPS = 2             # results of sweeps kept, every frame's maps
+MAX_FRAMES = 120
+MAX_SCENE_FILE = 200 * 1024 * 1024
+FRUSTUM_GRID = 160          # the mask mesh of Save frustum: at most this many vertices along a side
+MAX_PATCHES = 4096          # dense methods: the resolution is lowered until there are at most this many patches
+MAX_TILES = 3000            # window: more positions than this and the window must be bigger
+MIN_TILE = 16
+MAX_OVERLAP = 90            # percent
+MAX_TARGETS = 12            # gradients: at most this many maps (classes or prompts), each costs a full pass
+MAX_MAPS = 40               # segformer: at most this many classes are sent (the largest ones)
+MAP_SIDE = 384              # window maps and the reconstruction: at most this many pixels along the longer side
+SEGMENTATION_SIDE = 640     # the segmentation (argmax of the maps) is computed at this many pixels along the longer side
+KEEP_FEATURES = 16          # vectors per patch / per window kept for the next run
+BATCH_SIZE = 32
+PORT = 5005
+
+# id -> what the page needs to know. prompts: the kinds of prompt the method
+# can use (the page shows only those the model's family has); params: the
+# rows of controls it needs
+METHODS = {
+    "similarity": {"label": "similarity to the prompts, per patch", "families": ["dino", "clip"],
+                   "prompts": ["text", "image", "point"], "params": ["resolution", "reference", "compete"]},
+    "classes": {"label": "classes, head on every patch", "families": ["classifier"], "dense": True,
+                "prompts": [], "params": ["resolution"]},
+    "segformer": {"label": "classes per pixel", "families": ["segformer"], "prompts": [], "params": ["resolution"]},
+    "clipseg": {"label": "mask per prompt", "families": ["clipseg"], "prompts": ["text", "image"], "params": []},
+    "window": {"label": "sliding window", "families": ["classifier", "dino", "clip", "autoencoder"],
+               "prompts": ["text", "image"], "params": ["window", "compete"]},
+    "occlusion": {"label": "occlusion", "families": ["classifier", "dino", "clip", "autoencoder"],
+                  "prompts": ["text", "image"], "params": ["occluder"]},
+    "gradients": {"label": "integrated gradients", "families": ["classifier", "dino", "clip", "autoencoder"],
+                  "prompts": ["text", "image"], "params": ["gradients"]},
+    "attention": {"label": "[CLS] attention, last layer", "families": ["dino", "clip"], "prompts": [],
+                  "params": ["resolution"]},
+    "pca": {"label": "PCA of the patches → RGB", "families": ["dino", "clip", "classifier"], "dense": True,
+            "prompts": [], "params": ["resolution"]},
+    "kmeans": {"label": "k-means of the patches", "families": ["dino", "clip", "classifier"], "dense": True,
+               "prompts": [], "params": ["resolution", "k"]},
+}
+# the kinds of prompt each family understands
+FAMILY_PROMPTS = {"clip": ["text", "image", "point"], "dino": ["image", "point"], "autoencoder": ["image"],
+                  "clipseg": ["text", "image"], "classifier": [], "segformer": []}
+DEFAULT_METHOD = {"classifier": "classes", "autoencoder": "window", "dino": "similarity", "clip": "similarity",
+                  "segformer": "segformer", "clipseg": "clipseg"}
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024     # uploads
+
+# One model in memory at a time. model_lock guards loading and using it,
+# job_lock makes the computations run one after another.
+model_lock = threading.Lock()
+job_lock = threading.Lock()
+loaded = {"id": None, "model": None}
+
+models = {}                 # id -> {"id", "label", "kind", "family", "dense", "path"}
+images = {}                 # token -> {"image": PIL RGB, "name", "scene": set of frames it is in, or None}
+scenes = {}                 # scene id -> [frame tokens]
+scene_models = {}           # model id -> the meshes of a Rhino file (scene3d.read_3dm), for Save colored model
+sweeps = {}                 # sweep id -> every frame's result, as /api/run gives it
+features = {}               # (what, model id, token, ...) -> vectors, the last KEEP_FEATURES
+jobs = {}                   # job id -> progress and result
+next_job = itertools.count(1)
+
+
+def scan_models() -> None:
+    found = {m["id"]: m for m in find_models(ROOT_MODEL_FOLDER)}
+    models.clear()
+    models.update(found)
+    print(f"{len(models)} models")
+
+
+def methods_of(entry: dict) -> list[str]:
+    return [k for k, m in METHODS.items()
+            if entry["family"] in m["families"] and (entry["dense"] or not m.get("dense"))]
+
+
+# ---------------------------------------------------------------------------
+# Images
+# ---------------------------------------------------------------------------
+
+def uploaded(token: str) -> Image.Image:
+    """410 (gone) when the server doesn't have it (restarted, or too many
+    uploads since): the page then uploads the image again."""
+    if token not in images:
+        abort(410, "upload the image again")
+    return images[token]["image"]
+
+
+def forget(token: str) -> None:
+    images.pop(token, None)
+    for key in [k for k in features if k[2] == token]:
+        features.pop(key)
+
+
+def keep(image: Image.Image, name: str, scene: str | None = None) -> str:
+    """Remember an image -> its token. Uploaded images: the last KEEP_IMAGES
+    are kept; frames are kept with their set (see /api/scene/frames)."""
+    token = uuid.uuid4().hex
+    if scene is None:
+        for old in [t for t, v in images.items() if v["scene"] is None][:-(KEEP_IMAGES - 1)]:
+            forget(old)
+    images[token] = {"image": image, "name": name, "scene": scene}
+    return token
+
+
+def remember(key: tuple, value):
+    features[key] = value
+    for old in list(features)[:-KEEP_FEATURES]:
+        features.pop(old)
+    return value
+
+
+def png_url(image: Image.Image) -> str:
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def encode_map(m: np.ndarray, name: str, values: str, segment: bool) -> dict:
+    """A map as an 8 bit gray PNG and the values its black and white stand for.
+
+    values: probability (0..1), similarity (cosine), signed (around 0: drops,
+    attributions), free (anything else). The page picks its colors by it.
+    key: the name without a share in % ("wall (34%)" -> "wall"), the same
+    for the same class or prompt in every frame. segment: the map takes part
+    in the segmentation."""
+    lo, hi = float(m.min()), float(m.max())
+    q = np.round((m - lo) / max(hi - lo, 1e-12) * 255).astype(np.uint8)
+    return {"name": name, "key": re.sub(r" \(\d+%\)$", "", name), "png": png_url(Image.fromarray(q, "L")),
+            "lo": lo, "hi": hi, "mean": float(m.mean()), "values": values, "segment": segment}
+
+
+def segmentation(maps: np.ndarray, numbers: list[int], width: int, height: int) -> dict:
+    """Every pixel to the map highest there: maps [T, h, w] scaled up
+    (bilinear) to SEGMENTATION_SIDE with the image's proportions, then
+    argmax. numbers: the number of each of these maps among all the maps of
+    the result. -> labels (gray value = map number) and the value of the winner."""
+    scale = SEGMENTATION_SIDE / max(width, height)
+    size = (max(1, round(height * scale)), max(1, round(width * scale)))
+    up = F.interpolate(torch.from_numpy(maps).float()[None], size=size, mode="bilinear", align_corners=False)[0]
+    top, labels = up.max(0)
+    labels = np.array(numbers, dtype=np.uint8)[labels.numpy()]
+    top = top.numpy()
+    lo, hi = float(top.min()), float(top.max())
+    q = np.round((top - lo) / max(hi - lo, 1e-12) * 255).astype(np.uint8)
+    return {"labels": png_url(Image.fromarray(labels, "L")),
+            "top": png_url(Image.fromarray(q, "L")), "lo": lo, "hi": hi}
+
+
+def rgb_url(channels: np.ndarray) -> str:
+    """[3, h, w] -> PNG, every channel stretched so that 2% .. 98% of its
+    values fill 0..255"""
+    out = []
+    for c in channels:
+        lo, hi = np.percentile(c, [2, 98])
+        out.append(np.clip((c - lo) / max(hi - lo, 1e-12), 0, 1))
+    return png_url(Image.fromarray(np.round(np.stack(out, -1) * 255).astype(np.uint8), "RGB"))
+
+
+# ---------------------------------------------------------------------------
+# Models, prompts, scores
+# ---------------------------------------------------------------------------
+
+class Cancelled(Exception):
+    pass
+
+
+def check(job: dict) -> None:
+    if job["cancelled"]:
+        raise Cancelled()
+
+
+def load(model_id: str):
+    """Called with model_lock held."""
+    if loaded["id"] != model_id:
+        loaded["id"], loaded["model"] = None, None      # free the previous one first
+        if DEVICE.type == "cuda":
+            torch.cuda.empty_cache()
+        print(f"loading {model_id}")
+        loaded["model"] = load_model(models[model_id], DEVICE)
+        loaded["id"] = model_id
+        print(loaded["model"].description)
+    return loaded["model"]
+
+
+def texts_of(p: dict) -> list[str]:
+    return [t.strip() for t in p["texts"] if t.strip()]
+
+
+def prompt_vectors(m, p: dict, image: Image.Image) -> tuple[list[str], torch.Tensor]:
+    """The prompts as vectors in the space of embed(), L2-normalized [T, D]:
+    texts (CLIP), reference images, or the whole image when there are none"""
+    names, vectors = [], []
+    texts = texts_of(p) if m.family == "clip" else []
+    if texts:
+        wrapped = [p["template"].replace("{}", t) for t in texts]
+        names += texts
+        vectors.append(m.text_vectors(wrapped))
+    if p["references"]:
+        names += [f"image: {images[r]['name']}" for r in p["references"]]
+        vectors.append(m.image_vectors([uploaded(r) for r in p["references"]]))
+    if not vectors:
+        names.append("the whole image")
+        vectors.append(m.image_vectors([image]))
+    # clone: inference tensors can't take part in the gradients
+    return names, F.normalize(torch.cat(vectors).float(), dim=-1).clone()
+
+
+def scorer(m, p: dict, image: Image.Image):
+    """-> (names, score function: images [B, 3, S, S] -> [B, T] (differentiable),
+    kind of score). Classifiers: the logits of the classes, others: cosine
+    similarity of the image vector to every prompt."""
+    if m.family == "classifier":
+        return m.class_names, m.logits, "logits"
+    names, P = prompt_vectors(m, p, image)
+    return names, (lambda x: F.normalize(m.backbone.embed(x).float(), dim=-1) @ P.T), "similarity"
+
+
+def compete(scores: np.ndarray, temperature: float, axis: int) -> np.ndarray:
+    """softmax over the maps: probabilities that add up to 1 at every pixel"""
+    z = scores / temperature
+    z = np.exp(z - z.max(axis=axis, keepdims=True))
+    return z / z.sum(axis=axis, keepdims=True)
+
+
+# ---------------------------------------------------------------------------
+# Vectors per patch: similarity, classes, attention, pca, kmeans
+# ---------------------------------------------------------------------------
+
+def patch_grid(m, image: Image.Image, long_side: int) -> tuple[int, int]:
+    """The input size (w, h) for vectors per patch: about long_side pixels,
+    at most MAX_PATCHES patches"""
+    patch = m.backbone.patch
+    w, h = dense_size(*image.size, long_side, patch)
+    while (w // patch) * (h // patch) > MAX_PATCHES:
+        long_side = int(long_side * 0.9)
+        w, h = dense_size(*image.size, long_side, patch)
+    return w, h
+
+
+def dense_vectors(m, model_id: str, token: str, long_side: int) -> torch.Tensor:
+    """[h, w, D] on the cpu, one vector per patch of the image"""
+    image = uploaded(token)
+    size = patch_grid(m, image, long_side)
+    key = ("dense", model_id, token, size)
+    if key not in features:
+        with torch.inference_mode():
+            remember(key, m.backbone.dense(m.tensor([image], size))[0].float().cpu())
+    return features[key]
+
+
+def at_points(tokens: torch.Tensor, points: list, width: int, height: int) -> torch.Tensor:
+    """The vectors [len(points), D] at points (x, y) in image pixels, bilinear
+    between the patch centers"""
+    grid = torch.tensor([[[2 * x / width - 1, 2 * y / height - 1] for x, y in points]], dtype=torch.float32)
+    out = F.grid_sample(tokens.permute(2, 0, 1)[None], grid[None], mode="bilinear", align_corners=False)
+    return out[0, :, 0].T
+
+
+def method_similarity(m, p: dict, job: dict) -> dict:
+    image = uploaded(p["token"])
+    tokens = F.normalize(dense_vectors(m, p["model"], p["token"], p["resolution"]), dim=-1)
+    h, w, _ = tokens.shape
+    flat = tokens.reshape(h * w, -1)
+    names, maps = [], []
+
+    def add(name, vectors):
+        names.append(name)
+        maps.append((flat @ F.normalize(vectors.float().cpu(), dim=-1).T).reshape(h, w))
+
+    texts = texts_of(p) if m.family == "clip" else []
+    if texts:
+        vectors = m.text_vectors([p["template"].replace("{}", t) for t in texts]).cpu()
+        for t, v in zip(texts, vectors):
+            add(t, v[None])
+    if p["points"]:
+        # the points may have been picked on another image (another frame of
+        # the same model): its patches are looked for in this one
+        source = p["points_token"] or p["token"]
+        tokens_there = tokens if source == p["token"] else \
+            F.normalize(dense_vectors(m, p["model"], source, p["resolution"]), dim=-1)
+        for i, point in enumerate(p["points"]):
+            add(f"point {i + 1}", at_points(tokens_there, [point], *uploaded(source).size))
+    for r in p["references"]:
+        check(job)
+        name = f"image: {images[r]['name']}"
+        if p["reference"] == "patches":
+            # every patch: its similarity to the reference patch most like it
+            ref = F.normalize(dense_vectors(m, p["model"], r, p["resolution"]), dim=-1)
+            names.append(name)
+            maps.append((flat @ ref.reshape(-1, ref.shape[-1]).T).max(1).values.reshape(h, w))
+        else:
+            add(name, m.image_vectors([uploaded(r)]))
+    if not maps:
+        add("the whole image", m.image_vectors([image]))
+
+    maps = to_numpy(torch.stack(maps))
+    notes = [f"{w} × {h} patches"]
+    if p["compete"] and len(maps) > 1:
+        maps = compete(maps, p["temperature"], 0)
+        notes.append(f"softmax over the {len(maps)} prompts, temperature {p['temperature']}")
+        values = "probability"
+    else:
+        values = "similarity"
+    return {"maps": [encode_map(x, n, values, len(maps) > 1) for x, n in zip(maps, names)],
+            "grid": [w, h], "notes": notes, "segment_from": maps}
+
+
+def method_classes(m, p: dict, job: dict) -> dict:
+    tokens = dense_vectors(m, p["model"], p["token"], p["resolution"])
+    h, w, _ = tokens.shape
+    with torch.inference_mode():
+        probabilities = m.head(tokens.to(DEVICE)).float().softmax(-1).permute(2, 0, 1)
+    maps = to_numpy(probabilities)
+    return {"maps": [encode_map(x, n, "probability", True) for x, n in zip(maps, m.class_names)],
+            "grid": [w, h], "notes": [f"{w} × {h} patches, softmax over the classes at every patch"],
+            "segment_from": maps}
+
+
+def method_attention(m, p: dict, job: dict) -> dict:
+    image = uploaded(p["token"])
+    size = patch_grid(m, image, p["resolution"])
+    with torch.inference_mode():
+        a = m.backbone.attention(m.tensor([image], size))[0].float()
+    maps = to_numpy(torch.cat([a.mean(0, keepdim=True), a]))
+    names = ["mean of the heads"] + [f"head {i + 1}" for i in range(len(a))]
+    return {"maps": [encode_map(x, n, "free", False) for x, n in zip(maps, names)],
+            "grid": [size[0] // m.backbone.patch, size[1] // m.backbone.patch],
+            "notes": [f"{len(a)} heads, the [CLS] token's attention to every patch"]}
+
+
+def method_pca(m, p: dict, job: dict) -> dict:
+    tokens = dense_vectors(m, p["model"], p["token"], p["resolution"])
+    h, w, d = tokens.shape
+    x = to_numpy(tokens.reshape(h * w, d))
+    x = x - x.mean(axis=0)
+    _, s, vt = np.linalg.svd(x, full_matrices=False)
+    components = (x @ vt[:3].T).T.reshape(-1, h, w)
+    share = s[:3] ** 2 / (s ** 2).sum()
+    names = [f"component {i + 1} ({100 * share[i]:.0f}%)" for i in range(len(components))]
+    return {"maps": [encode_map(c, n, "signed", False) for c, n in zip(components, names)],
+            "images": [{"name": "components 1, 2, 3 as R, G, B", "png": rgb_url(components)}],
+            "grid": [w, h], "notes": [f"{w} × {h} patches of {d} numbers, "
+                                      f"{100 * share.sum():.0f}% of the variance in 3 components"]}
+
+
+def method_kmeans(m, p: dict, job: dict) -> dict:
+    from sklearn.cluster import KMeans
+    tokens = F.normalize(dense_vectors(m, p["model"], p["token"], p["resolution"]), dim=-1)
+    h, w, d = tokens.shape
+    x = to_numpy(tokens.reshape(h * w, d))
+    k = max(2, min(p["k"], len(x)))
+    labels = KMeans(k, n_init="auto", random_state=0).fit_predict(x)
+    by_size = sorted(range(k), key=lambda c: -(labels == c).sum())
+    centers = np.stack([x[labels == c].mean(axis=0) for c in by_size])
+    centers /= np.maximum(np.linalg.norm(centers, axis=1, keepdims=True), 1e-8)
+    soft = compete(x @ centers.T, p["temperature"], 1).T.reshape(k, h, w)
+    names = [f"cluster {i + 1} ({100 * (labels == c).mean():.0f}%)" for i, c in enumerate(by_size)]
+    return {"maps": [encode_map(s, n, "probability", True) for s, n in zip(soft, names)],
+            "grid": [w, h], "notes": [f"{w} × {h} patches in {k} clusters, softmax of the similarity "
+                                      f"to their centers, temperature {p['temperature']}"],
+            "segment_from": soft}
+
+
+# ---------------------------------------------------------------------------
+# Models trained for segmentation
+# ---------------------------------------------------------------------------
+
+def method_segformer(m, p: dict, job: dict) -> dict:
+    probabilities = m.probabilities(uploaded(p["token"]), p["resolution"])
+    winners = probabilities.argmax(0)
+    area = torch.bincount(winners.flatten(), minlength=len(probabilities)).float() / winners.numel()
+    keep = [c for c in area.argsort(descending=True).tolist() if area[c] > 0][:MAX_MAPS]
+    maps = to_numpy(probabilities[keep])
+    names = [f"{m.class_names[c]} ({100 * area[c]:.0f}%)" for c in keep]
+    return {"maps": [encode_map(x, n, "probability", True) for x, n in zip(maps, names)],
+            "notes": [f"{len(keep)} of {len(m.class_names)} classes win somewhere, "
+                      f"{maps.shape[2]} × {maps.shape[1]} scores per class"],
+            "segment_from": maps}
+
+
+def method_clipseg(m, p: dict, job: dict) -> dict:
+    texts = texts_of(p)
+    references = [uploaded(r) for r in p["references"]]
+    if not texts and not references:
+        raise ValueError("CLIPSeg needs a prompt: some text or a reference image")
+    maps = to_numpy(m.masks(uploaded(p["token"]), texts, references).sigmoid())
+    names = texts + [f"image: {images[r]['name']}" for r in p["references"]]
+    return {"maps": [encode_map(x, n, "probability", True) for x, n in zip(maps, names)],
+            "notes": ["sigmoid of every prompt's mask: independent, each 0..1"], "segment_from": maps}
+
+
+# ---------------------------------------------------------------------------
+# Any model with a vector per image: window, occlusion, gradients
+# ---------------------------------------------------------------------------
+
+def starts(length: int, size: int, stride: int) -> list[int]:
+    """Window positions along one side, the last one flush with the edge"""
+    out = list(range(0, length - size + 1, stride))
+    if out[-1] + size < length:
+        out.append(length - size)
+    return out
+
+
+def window_layout(image: Image.Image, size: int, overlap: float) -> dict:
+    width, height = image.size
+    size = max(1, min(max(MIN_TILE, int(size)), width, height))
+    overlap = min(max(float(overlap), 0.0), MAX_OVERLAP)
+    stride = max(1, math.floor(size * (1 - overlap / 100) + 0.5))
+    boxes = [(x, y) for y in starts(height, size, stride) for x in starts(width, size, stride)]
+    return {"size": size, "stride": stride, "boxes": boxes}
+
+
+def bump(side: int) -> np.ndarray:
+    """Weights of a window's pixels: 1 in the center, 0.1 at the edges"""
+    w = np.hanning(side + 2)[1:-1]
+    return 0.1 + 0.9 * np.outer(w, w)
+
+
+def splat(values: np.ndarray, boxes: list, size: int, width: int, height: int) -> np.ndarray:
+    """Spread every window's values [N, T] over its pixels, a weighted mean
+    where windows overlap -> [T, h, w], at most MAP_SIDE along the longer side"""
+    scale = min(1.0, MAP_SIDE / max(width, height))
+    mw, mh = max(1, round(width * scale)), max(1, round(height * scale))
+    s = max(1, min(round(size * scale), mw, mh))
+    weights = bump(s)
+    total = np.zeros((values.shape[1], mh, mw), np.float32)
+    weight = np.full((mh, mw), 1e-8, np.float32)
+    for (x, y), v in zip(boxes, values):
+        x0, y0 = min(round(x * scale), mw - s), min(round(y * scale), mh - s)
+        total[:, y0:y0 + s, x0:x0 + s] += v[:, None, None] * weights
+        weight[y0:y0 + s, x0:x0 + s] += weights
+    return total / weight
+
+
+def window_vectors(m, p: dict, layout: dict, job: dict) -> dict:
+    """The vector of every window position (logits for classifiers) and, for
+    autoencoders, their reconstructions and reconstruction errors"""
+    key = ("window", p["model"], p["token"], layout["size"], layout["stride"])
+    if key in features:
+        return features[key]
+    image, size, boxes = uploaded(p["token"]), layout["size"], layout["boxes"]
+    autoencoder = m.family == "autoencoder"
+    out = {"vectors": [], "reconstructions": [], "errors": []}
+    for start in range(0, len(boxes), BATCH_SIZE):
+        check(job)
+        job["stage"] = f"window {start}/{len(boxes)}"
+        job["progress"] = start / len(boxes)
+        tiles = [image.crop((x, y, x + size, y + size)) for x, y in boxes[start:start + BATCH_SIZE]]
+        with torch.inference_mode():
+            x = m.tensor(tiles)
+            if m.family == "classifier":
+                out["vectors"].append(to_numpy(m.logits(x)))
+            else:
+                out["vectors"].append(to_numpy(m.backbone.embed(x)))
+            if autoencoder:
+                r = m.backbone.reconstruct(x)
+                out["reconstructions"] += [to_numpy(t.permute(1, 2, 0)) for t in r]
+                out["errors"] += [to_numpy(e) for e in ((r - x) ** 2).mean(1)]
+    out["vectors"] = np.concatenate(out["vectors"])
+    return remember(key, out)
+
+
+def splat_pictures(pictures: list, boxes: list, size: int, width: int, height: int) -> np.ndarray:
+    """Like splat(), with a small picture [s, s, C] per window -> [h, w, C]"""
+    scale = min(1.0, MAP_SIDE / max(width, height))
+    mw, mh = max(1, round(width * scale)), max(1, round(height * scale))
+    s = max(1, min(round(size * scale), mw, mh))
+    weights = bump(s)[..., None]
+    total = np.zeros((mh, mw, pictures[0].shape[2]), np.float32)
+    weight = np.full((mh, mw, 1), 1e-8, np.float32)
+    for (x, y), picture in zip(boxes, pictures):
+        x0, y0 = min(round(x * scale), mw - s), min(round(y * scale), mh - s)
+        small = TF.resize(torch.from_numpy(picture).permute(2, 0, 1), [s, s], antialias=True)
+        total[y0:y0 + s, x0:x0 + s] += small.permute(1, 2, 0).numpy() * weights
+        weight[y0:y0 + s, x0:x0 + s] += weights
+    return total / weight
+
+
+def method_window(m, p: dict, job: dict) -> dict:
+    image = uploaded(p["token"])
+    layout = window_layout(image, p["window"], p["overlap"])
+    if len(layout["boxes"]) > MAX_TILES:
+        raise ValueError(f"{len(layout['boxes'])} window positions, at most {MAX_TILES}: "
+                         f"make the window bigger or overlap less")
+    done = window_vectors(m, p, layout, job)
+    size, boxes = layout["size"], layout["boxes"]
+    notes = [f"{len(boxes)} positions of a {size} px window, one every {layout['stride']} px"]
+    if m.family == "classifier":
+        names, values = m.class_names, compete(done["vectors"], 1.0, 1)
+        kind = "probability"
+        notes.append("softmax over the classes at every position")
+    else:
+        names, P = prompt_vectors(m, p, image)
+        v = done["vectors"]
+        values = (v / np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-8)) @ to_numpy(P).T
+        kind = "similarity"
+        if p["compete"] and len(names) > 1:
+            values, kind = compete(values, p["temperature"], 1), "probability"
+            notes.append(f"softmax over the {len(names)} prompts, temperature {p['temperature']}")
+    job["stage"] = "spreading the scores over the image"
+    maps = splat(values, boxes, size, *image.size)
+    result = {"maps": [encode_map(x, n, kind, len(maps) > 1) for x, n in zip(maps, names)],
+              "notes": notes, "segment_from": maps if len(maps) > 1 else None}
+    if m.family == "autoencoder":
+        error = splat_pictures([e[..., None] for e in done["errors"]], boxes, size, *image.size)[..., 0]
+        result["maps"].insert(0, encode_map(error, "reconstruction error", "free", False))
+        picture = splat_pictures(done["reconstructions"], boxes, size, *image.size)
+        result["images"] = [{"name": "reconstruction",
+                             "png": png_url(Image.fromarray(np.round(np.clip(picture, 0, 1) * 255)
+                                                            .astype(np.uint8), "RGB"))}]
+        notes.append("reconstruction error: mean squared difference per pixel")
+    return result
+
+
+def gradient_targets(m, p: dict, image: Image.Image) -> tuple[list[str], object, list[int], str]:
+    """-> (names, score function, the targets to compute, note): at most
+    MAX_TARGETS, for classifiers the most probable classes"""
+    names, score, _ = scorer(m, p, image)
+    targets = list(range(len(names)))
+    note = ""
+    if len(targets) > MAX_TARGETS:
+        if m.family == "classifier":
+            with torch.inference_mode():
+                order = score(m.tensor([image]))[0].argsort(descending=True).tolist()
+            targets = sorted(order[:MAX_TARGETS])
+            note = f"the {MAX_TARGETS} most probable of {len(names)} classes"
+        else:
+            targets = targets[:MAX_TARGETS]
+            note = f"the first {MAX_TARGETS} of {len(names)} prompts"
+    return names, score, targets, note
+
+
+def method_occlusion(m, p: dict, job: dict) -> dict:
+    image = uploaded(p["token"])
+    names, score, _ = scorer(m, p, image)
+    if m.family == "classifier":
+        score_of = lambda x: score(x).softmax(-1)       # probabilities: drops are comparable
+    else:
+        score_of = score
+    x = m.tensor([image])
+    S = x.shape[-1]
+    side = max(2, round(S * p["occluder"] / 100))
+    stride = max(1, side // 2)
+    positions = [(a, b) for b in starts(S, side, stride) for a in starts(S, side, stride)]
+    fill = x.mean(dim=(2, 3), keepdim=True)         # the image's average color
+    total = torch.zeros(len(names), S, S)
+    count = torch.zeros(S, S)
+    with torch.inference_mode():
+        base = score_of(x)[0].float().cpu()
+        for start in range(0, len(positions), BATCH_SIZE):
+            check(job)
+            job["stage"] = f"occluding {start}/{len(positions)}"
+            job["progress"] = start / len(positions)
+            batch = positions[start:start + BATCH_SIZE]
+            xb = x.repeat(len(batch), 1, 1, 1)
+            for i, (a, b) in enumerate(batch):
+                xb[i, :, b:b + side, a:a + side] = fill[0]
+            drops = base - score_of(xb).float().cpu()
+            for (a, b), d in zip(batch, drops):
+                total[:, b:b + side, a:a + side] += d[:, None, None]
+                count[b:b + side, a:a + side] += 1
+    maps = to_numpy(total / count.clamp(min=1))
+    what = "probability" if m.family == "classifier" else "similarity"
+    return {"maps": [encode_map(x, n, "signed", False) for x, n in zip(maps, names)],
+            "notes": [f"{len(positions)} positions of a {side} px square on the {S} × {S} input "
+                      f"(the image squashed to it); the drop of the {what} when hidden"]}
+
+
+def method_gradients(m, p: dict, job: dict) -> dict:
+    image = uploaded(p["token"])
+    names, score, targets, note = gradient_targets(m, p, image)
+    x = m.tensor([image])
+    S = x.shape[-1]
+    if p["baseline"] == "blur":
+        baseline = m.tensor([image.filter(ImageFilter.GaussianBlur(max(image.size) / 25))])
+    elif p["baseline"] == "black":
+        baseline = m.tensor([Image.new("RGB", image.size)])
+    else:
+        baseline = x.mean(dim=(2, 3), keepdim=True).expand_as(x)
+    steps = max(2, min(int(p["steps"]), 256))
+    alphas = (torch.arange(steps, dtype=torch.float32, device=DEVICE) + 0.5) / steps
+    maps = []
+    for n, t in enumerate(targets):
+        gradient = torch.zeros_like(x)
+        for start in range(0, steps, 8):
+            check(job)
+            job["stage"] = f"gradients of {names[t]}: step {start}/{steps}"
+            job["progress"] = (n + start / steps) / len(targets)
+            a = alphas[start:start + 8].view(-1, 1, 1, 1)
+            path = (baseline + a * (x - baseline)).detach().requires_grad_(True)
+            gradient += torch.autograd.grad(score(path)[:, t].sum(), path)[0].sum(0, keepdim=True)
+        attribution = ((x - baseline) * gradient / steps).sum(1)        # [1, S, S], summed over R, G, B
+        if p["smooth"] > 0:
+            sigma = p["smooth"] * S / 224
+            attribution = TF.gaussian_blur(attribution, 2 * math.ceil(3 * sigma) + 1, sigma)
+        maps.append(to_numpy(attribution[0]))
+    what = "logit" if m.family == "classifier" else "similarity"
+    notes = [f"{steps} steps from a {p['baseline']} baseline on the {S} × {S} input "
+             f"(the image squashed to it); the {what} each pixel adds"] + ([note] if note else [])
+    return {"maps": [encode_map(x, names[t], "signed", False) for x, t in zip(maps, targets)], "notes": notes}
+
+
+RUN = {"similarity": method_similarity, "classes": method_classes, "attention": method_attention,
+       "pca": method_pca, "kmeans": method_kmeans, "segformer": method_segformer, "clipseg": method_clipseg,
+       "window": method_window, "occlusion": method_occlusion, "gradients": method_gradients}
+
+
+def segmenting(result: dict) -> np.ndarray | None:
+    """The maps the segmentation is made of, None when there is none (one
+    map has nothing to compete with)"""
+    maps = result.pop("segment_from", None)
+    return maps if maps is not None and len(maps) > 1 else None
+
+
+def segment_numbers(result: dict) -> list[int]:
+    """The number of every map that takes part in the segmentation, among all the maps"""
+    return [i for i, m in enumerate(result["maps"]) if m["segment"]]
+
+
+def package(m, p: dict, result: dict, segment_from: np.ndarray | None, start: float) -> dict:
+    """A method's result as the page gets it"""
+    if segment_from is not None:
+        result["segmentation"] = segmentation(segment_from, segment_numbers(result), *uploaded(p["token"]).size)
+    return {
+        "model": p["model"],
+        "method": p["method"],
+        "token": p["token"],
+        "family": m.family,
+        "maps": result["maps"],                     # [{name, key, png, lo, hi, mean, values, segment}]
+        "segmentation": result.get("segmentation"),     # {labels, top, lo, hi} or None
+        "images": result.get("images", []),         # [{name, png}]: RGB pictures
+        "grid": result.get("grid"),                 # [columns, rows] of patches, dense methods only
+        "notes": result.get("notes", []),
+        "seconds": round(time.perf_counter() - start, 2),
+    }
+
+
+def run_job(job: dict, p: dict) -> None:
+    try:
+        with job_lock:
+            check(job)
+            start = time.perf_counter()
+            with model_lock:
+                job["stage"] = f"loading {models[p['model']]['label']}"
+                m = load(p["model"])
+                job["stage"] = METHODS[p["method"]]["label"]
+                result = RUN[p["method"]](m, p, job)
+            job["stage"] = "segmentation"
+            job["result"] = package(m, p, result, segmenting(result), start)
+            job["stage"] = "done"
+    except Cancelled:
+        job["stage"] = "cancelled"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        job["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        job["finished"] = True
+
+
+class FrameJob(dict):
+    """What a method sees as its job while a sweep runs it on frame `frame`
+    of `count`: its stage and progress go to the sweep's job, as part of the
+    whole, and the sweep's cancellation stops it."""
+
+    def __init__(self, job: dict, frame: int, count: int):
+        super().__init__()
+        self.job, self.frame, self.count = job, frame, count
+
+    def __getitem__(self, key):
+        return self.job[key] if key == "cancelled" else super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        if key == "stage":
+            self.job["stage"] = f"frame {self.frame + 1}/{self.count}: {value}"
+        elif key == "progress":
+            self.job["progress"] = (self.frame + value) / self.count
+        super().__setitem__(key, value)
+
+
+def sweep_job(job: dict, p: dict) -> None:
+    """The current method on every frame. Per frame and per map key (class,
+    prompt...): the map's mean, its maximum, the share of the segmentation it
+    wins. Keys missing in a frame (SegFormer lists only the classes it finds)
+    are None. Every frame's whole result is kept too (/api/sweep/<id>/<frame>),
+    for Save all frustums and coloring the model from all views."""
+    try:
+        with job_lock:
+            check(job)
+            start = time.perf_counter()
+            frames = p["frames"]
+            rows, results = [], []
+            with model_lock:
+                job["stage"] = f"loading {models[p['model']]['label']}"
+                m = load(p["model"])
+                for f, token in enumerate(frames):
+                    check(job)
+                    sub = FrameJob(job, f, len(frames))
+                    sub["stage"] = METHODS[p["method"]]["label"]
+                    sub["progress"] = 0.0
+                    q = {**p, "token": token}
+                    frame_start = time.perf_counter()
+                    result = RUN[p["method"]](m, q, sub)
+                    row = {mp["key"]: {"mean": mp["mean"], "max": mp["hi"], "values": mp["values"]}
+                           for mp in result["maps"]}
+                    segment_from = segmenting(result)
+                    if segment_from is not None:
+                        winners = segment_from.argmax(0)
+                        for n, i in enumerate(segment_numbers(result)):
+                            row[result["maps"][i]["key"]]["area"] = float((winners == n).mean())
+                    rows.append(row)
+                    results.append(package(m, q, result, segment_from, frame_start))
+            keys = list(dict.fromkeys(k for row in rows for k in row))
+            table = lambda what: [[row[k].get(what) if k in row else None for k in keys] for row in rows]
+            has_area = any("area" in v for row in rows for v in row.values())
+            sweep_id = uuid.uuid4().hex
+            sweeps[sweep_id] = results
+            for old in list(sweeps)[:-KEEP_SWEEPS]:
+                sweeps.pop(old)
+            job["result"] = {
+                "sweep": sweep_id,
+                "model": p["model"],
+                "method": p["method"],
+                "frames": frames,
+                "keys": keys,
+                "values": {k: next(row[k]["values"] for row in rows if k in row) for k in keys},
+                "mean": table("mean"),                  # [frame][key]
+                "max": table("max"),
+                "area": table("area") if has_area else None,
+                "seconds": round(time.perf_counter() - start, 2),
+            }
+            job["stage"] = "done"
+    except Cancelled:
+        job["stage"] = "cancelled"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        job["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        job["finished"] = True
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return send_from_directory(WEB, "segment.html")
+
+
+@app.route("/<path:name>")
+def static_file(name):
+    return send_from_directory(WEB, name)
+
+
+@app.get("/api/options")
+def options():
+    model_list = [{**{k: m[k] for k in ("id", "label", "kind", "family")}, "methods": methods_of(m)}
+                  for m in models.values()]
+    return jsonify({
+        "models": model_list,
+        "methods": METHODS,
+        "family_prompts": FAMILY_PROMPTS,
+        "default_method": DEFAULT_METHOD,
+        "default_model": DEFAULT_MODEL if DEFAULT_MODEL in models else (model_list[0]["id"] if model_list else None),
+        "model_root": ROOT_MODEL_FOLDER,
+        "max_side": MAX_SIDE,
+        "max_tiles": MAX_TILES,
+        "min_tile": MIN_TILE,
+        "max_overlap": MAX_OVERLAP,
+        "max_targets": MAX_TARGETS,
+    })
+
+
+@app.post("/api/rescan")
+def rescan():
+    scan_models()
+    return options()
+
+
+@app.post("/api/upload")
+def upload():
+    """An image from the page: kept in memory (EXIF rotation applied, at most
+    MAX_SIDE pixels along its longest side) until KEEP_IMAGES newer ones came."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        abort(400, "no file")
+    try:
+        image = ImageOps.exif_transpose(Image.open(file.stream)).convert("RGB")
+    except Exception as e:
+        abort(400, f"can't read {file.filename} as an image: {e}")
+    original = image.size
+    image.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    token = keep(image, Path(file.filename).name)
+    return jsonify({"token": token, "name": images[token]["name"], "width": image.width,
+                    "height": image.height, "original": original})
+
+
+@app.get("/api/image/<token>")
+def image_file(token: str):
+    image = uploaded(token)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=92)
+    response = send_file(io.BytesIO(buffer.getvalue()), mimetype="image/jpeg")
+    response.headers["Cache-Control"] = "max-age=3600"
+    return response
+
+
+@app.post("/api/scene/model")
+def scene_model():
+    """A Rhino file -> its meshes, for the page to render (scene3d.read_3dm)"""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        abort(400, "no file")
+    data = file.read()
+    if len(data) > MAX_SCENE_FILE:
+        abort(400, "the file is too big")
+    try:
+        scene = scene3d.read_3dm(data)
+    except ValueError as e:
+        abort(400, f"{file.filename}: {e}")
+    model_id = uuid.uuid4().hex
+    scene_models[model_id] = scene
+    for old in list(scene_models)[:-KEEP_SCENES]:
+        scene_models.pop(old)
+    return jsonify({"id": model_id, "name": Path(file.filename).name, **scene})
+
+
+@app.post("/api/scene/frames")
+def scene_frames():
+    """The frames the page rendered, as one set: kept until KEEP_SCENES newer
+    sets came (uploads of single images don't push them out)."""
+    files = request.files.getlist("frames")
+    if not files or len(files) > MAX_FRAMES:
+        abort(400, f"1 to {MAX_FRAMES} frames")
+    scene = uuid.uuid4().hex
+    for old in list(scenes)[:-(KEEP_SCENES - 1)]:
+        for token in scenes.pop(old):
+            forget(token)
+    scenes[scene] = [keep(Image.open(f.stream).convert("RGB"), Path(f.filename).name, scene) for f in files]
+    return jsonify({"scene": scene, "tokens": scenes[scene]})
+
+
+def run_params(body: dict) -> dict:
+    """The settings of a run (or a sweep) from the page, checked"""
+    token = body.get("token", "")
+    uploaded(token)
+    p = {
+        "model": body.get("model"),
+        "method": body.get("method"),
+        "token": token,
+        "texts": list(body.get("texts", [])),
+        "template": body.get("template") or "{}",
+        "references": list(body.get("references", [])),
+        "points": [(float(x), float(y)) for x, y in body.get("points", [])],
+        "points_token": body.get("points_token") or None,
+        "resolution": min(max(int(body.get("resolution", 448)), 32), 2048),
+        "reference": body.get("reference", "global"),
+        "compete": bool(body.get("compete", True)),
+        "temperature": max(float(body.get("temperature", 0.03)), 1e-4),
+        "window": int(body.get("window", 128)),
+        "overlap": float(body.get("overlap", 50)),
+        "occluder": min(max(float(body.get("occluder", 12)), 1), 100),
+        "steps": int(body.get("steps", 32)),
+        "baseline": body.get("baseline", "blur"),
+        "smooth": max(float(body.get("smooth", 2)), 0.0),
+        "k": int(body.get("k", 6)),
+    }
+    if p["model"] not in models:
+        abort(404, f"no model {p['model']}")
+    if p["method"] not in methods_of(models[p["model"]]):
+        abort(400, f"{models[p['model']]['label']} can't do {p['method']}")
+    if p["baseline"] not in ("blur", "black", "mean"):
+        abort(400, f"unknown baseline {p['baseline']}")
+    if "{}" not in p["template"]:
+        p["template"] += " {}"
+    for r in p["references"] + ([p["points_token"]] if p["points_token"] else []):
+        uploaded(r)
+    return p
+
+
+def start_job(target, p: dict):
+    """Run target(job, p) in a thread, cancelling any earlier job -> {"job": id}"""
+    for old in jobs.values():
+        old["cancelled"] = True
+    job_id = next(next_job)
+    jobs[job_id] = {"id": job_id, "stage": "waiting", "progress": 0.0, "cancelled": False,
+                    "finished": False, "result": None, "error": None}
+    threading.Thread(target=target, args=(jobs[job_id], p), daemon=True).start()
+    return jsonify({"job": job_id})
+
+
+@app.post("/api/run")
+def run():
+    """Start computing the maps. Returns a job id to poll with /api/job/<id>.
+    Any earlier job still running is cancelled."""
+    return start_job(run_job, run_params(request.get_json()))
+
+
+@app.post("/api/sweep")
+def sweep():
+    """The current method on every frame of a set (see sweep_job). Returns a
+    job id to poll with /api/job/<id>."""
+    body = request.get_json()
+    p = run_params(body)
+    p["frames"] = list(body.get("frames", []))
+    if not p["frames"] or len(p["frames"]) > MAX_FRAMES:
+        abort(400, f"1 to {MAX_FRAMES} frames")
+    for token in p["frames"]:
+        uploaded(token)
+    return start_job(sweep_job, p)
+
+
+@app.get("/api/sweep/<sweep_id>/<int:frame>")
+def sweep_frame(sweep_id: str, frame: int):
+    """One frame's whole result from a sweep"""
+    if sweep_id not in sweeps:
+        abort(410, "compute all frames again")
+    if not 0 <= frame < len(sweeps[sweep_id]):
+        abort(404, f"no frame {frame}")
+    return jsonify(sweeps[sweep_id][frame])
+
+
+def picture_from(data_url: str) -> Image.Image:
+    return Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[1]))).convert("RGB")
+
+
+@app.post("/api/export/frustum")
+def export_frustum():
+    """A frame's camera and a mask as a Rhino file (scene3d.frustum_3dm). The
+    page sends the camera, the mask as it draws it (a PNG data URL) and the
+    frame's token; both become meshes of at most FRUSTUM_GRID vertices along
+    a side."""
+    body = request.get_json()
+    camera = body["camera"]
+    mask, frame = grid_of(body["mask"], body.get("token"))
+    data = scene3d.frustum_3dm(camera, mask, frame, body.get("name", "frame"),
+                               plane=min(max(float(body.get("plane", 0.5)), 0.01), 1.0))
+    return send_3dm(data, body.get("name", "frame"))
+
+
+def send_3dm(data: bytes, name: str):
+    return send_file(io.BytesIO(data), mimetype="application/octet-stream", as_attachment=True,
+                     download_name=re.sub(r"[^\w.-]+", "_", name) + ".3dm")
+
+
+def grid_of(data_url: str, token: str | None) -> tuple[np.ndarray, np.ndarray | None]:
+    """A mask from the page and its frame, both at most FRUSTUM_GRID along a side"""
+    mask = picture_from(data_url)
+    scale = min(1.0, FRUSTUM_GRID / max(mask.size))
+    size = (max(2, round(mask.width * scale)), max(2, round(mask.height * scale)))
+    frame = np.asarray(uploaded(token).resize(size, Image.BILINEAR)) if token else None
+    return np.asarray(mask.resize(size, Image.BILINEAR)), frame
+
+
+@app.post("/api/export/frustums")
+def export_frustums():
+    """Many frames' cameras and masks in one Rhino file (scene3d.frustums_3dm).
+    The page sends [{camera, mask, token, name, value}]."""
+    body = request.get_json()
+    frames = []
+    for f in body["frames"]:
+        mask, picture = grid_of(f["mask"], f.get("token"))
+        frames.append({"camera": f["camera"], "mask": mask, "picture": picture, "name": f["name"],
+                       "value": f.get("value")})
+    data = scene3d.frustums_3dm(frames, plane=min(max(float(body.get("plane", 0.5)), 0.01), 1.0))
+    return send_3dm(data, body.get("name", "frustums"))
+
+
+@app.post("/api/export/model")
+def export_model():
+    """The meshes of the Rhino file with a color per vertex, as the page
+    computed them: {model: id from /api/scene/model, colors: [base64 of
+    r, g, b bytes per vertex, one per mesh], name}"""
+    body = request.get_json()
+    if body.get("model") not in scene_models:
+        abort(410, "load the Rhino file again")
+    meshes = scene_models[body["model"]]["meshes"]
+    colors = [np.frombuffer(base64.b64decode(c), np.uint8).reshape(-1, 3) for c in body["colors"]]
+    if len(colors) != len(meshes) or any(len(c) * 3 != len(m["vertices"]) for c, m in zip(colors, meshes)):
+        abort(400, "one color per vertex of every mesh")
+    name = body.get("name", "model")
+    return send_3dm(scene3d.colored_model_3dm(meshes, colors, name), name)
+
+
+@app.get("/api/job/<int:job_id>")
+def job_status(job_id: int):
+    if job_id not in jobs:
+        abort(404)
+    job = jobs[job_id]
+    if job["finished"]:
+        jobs.pop(job_id)    # the result is collected once
+    return jsonify({k: job[k] for k in ("id", "stage", "progress", "finished", "result", "error")})
+
+
+if __name__ == "__main__":
+    print(f"device: {DEVICE}")
+    scan_models()
+    # no debug reloader: it would start the app (and load the model) twice
+    app.run(port=PORT, threaded=True)

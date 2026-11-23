@@ -1,0 +1,11 @@
+[project]
+name = "qa2026"
+version = "0.1.0"
+description = "Quantitative Aesthetics 2026"
+requires-python = ">=3.12"
+
+dependencies = [
+    "flask>=3.1.3",
+    "gensim>=4.4.0",
+    "scikit-learn>=1.9.1",
+]

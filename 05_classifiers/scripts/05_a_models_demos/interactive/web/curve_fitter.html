@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Curve Fitter</title>
+  <link rel="stylesheet" href="curve_fitter.css">
+</head>
+<body>
+  <header>
+    <h1>Curve Fitter</h1>
+    <p>Draw a curve, build a network that maps <code>t ∈ [0,1]</code> <code>[N,1] → [N,2]</code>, then optimize it to trace the curve.</p>
+  </header>
+
+  <main>
+    <section class="panel drawing">
+      <div class="toolbar">
+        <label>N points <input id="n-points" type="number" min="2" max="2000" value="100"></label>
+        <label><input id="show-links" type="checkbox" checked> show matches</label>
+        <button id="clear">Clear</button>
+      </div>
+      <canvas id="canvas"></canvas>
+      <p class="hint" id="draw-hint">Drag on the canvas to draw a curve.</p>
+    </section>
+
+    <section class="panel model">
+      <div class="panel-head">
+        <h2>Layers</h2>
+        <label class="preset">preset
+          <select id="preset">
+            <option value="">—</option>
+            <option value="fourier">Fourier formula</option>
+            <option value="mlp">MLP</option>
+            <option value="mixed">Formula + Linear</option>
+          </select>
+        </label>
+      </div>
+
+      <ol id="layers">
+      </ol>
+      <div class="add-row">
+        <button id="add-btn" class="add" title="Add layer">+</button>
+        <div id="add-menu" class="menu" hidden>
+          <button data-type="linear">Linear</button>
+          <button data-type="relu">ReLU</button>
+          <button data-type="function">Function</button>
+        </div>
+        <span id="model-status" class="status"></span>
+      </div>
+
+      <h2>Properties</h2>
+      <div id="props" class="props"><p class="hint">Select a layer to edit it.</p></div>
+    </section>
+
+    <section class="panel train">
+      <h2>Optimize</h2>
+      <div class="toolbar">
+        <label>optimizer <select id="optimizer"></select></label>
+        <span id="opt-settings"></span>
+        <label>loss <select id="loss"><option value="MSE">MSE</option><option value="L1">L1</option></select></label>
+        <label>steps <input id="steps" type="number" min="1" value="2000"></label>
+        <label>learning rate <input id="lr" type="number" step="0.001" min="0" value="0.01"></label>
+        <label title="Keep formula parameters inside their slider ranges"><input id="clamp" type="checkbox" checked> clamp to ranges</label>
+      </div>
+      <div class="toolbar">
+        <button id="optimize" class="primary">Optimize</button>
+        <button id="reinit" title="Random weights for Linear layers, 1.0 for formula parameters">Reset parameters</button>
+      </div>
+      <div class="loss-head">
+        <span id="loss-label">MSE loss</span>
+        <span id="loss-value" class="loss-value">–</span>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="loss-chart"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+      </div>
+      <p class="hint" id="train-status"></p>
+    </section>
+  </main>
+
+  <script src="curve_fitter.js"></script>
+</body>
+</html>

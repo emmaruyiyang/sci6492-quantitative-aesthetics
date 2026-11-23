@@ -1,0 +1,720 @@
+"""Tile Map (web/tiles.html): one image cut into square tiles, every tile
+placed on a 2D map by the vector a model gives it, and grouped into clusters.
+Next to the map the image is put back together from its tiles, each one
+colored by its cluster: a segmentation of the image by what the model sees.
+
+    image  ->  tiles  ->  model  ->  one vector per tile  ->  projection  ->  (x, y)
+                                                          ->  clustering  ->  group
+
+The embedding map of 06_autoencoders/app_server.py, with the dataset
+replaced by the tiles of one image uploaded from the page (no training, no
+dataset conversion, no audio, no interpolation).
+
+Tiles are size x size pixels. overlap is the percentage of a tile shared with
+the next one: the tiles start every stride = size * (1 - overlap) pixels,
+left to right, top to bottom (tile k = row k // columns, column k % columns).
+What is left at the right and bottom edges, less than a stride, is not
+covered.
+
+Models (picked in the page) are every folder under ROOT_MODEL_FOLDER whose
+config.json is an autoencoder or a classifier, plus pretrained DINOv2 and CLIP
+image encoders. See embedders.py.
+
+Projections squeeze the vectors (128, 768, ... numbers) down to 2:
+
+  PCA    the 2 directions along which the vectors spread the most. Linear, fast,
+         keeps large distances, but crowds most tiles into the middle.
+  t-SNE  keeps neighbours together: tiles close in the vector space end up
+         close on the map. Distances between far-apart groups mean little.
+         perplexity ~ how many neighbours each tile cares about.
+  UMAP   like t-SNE, faster, keeps somewhat more of the global layout.
+         neighbours = how many neighbours each tile cares about.
+
+  clusters  not a projection of the vectors: a grid, int(sqrt(N)) columns,
+         one section of rows per cluster (computed on the vectors), each
+         cluster's tiles from left to right from the most representative
+         (closest to the cluster's center) to the least.
+
+Clusterings group the tiles, on the vectors or on the 2D map:
+
+  k-means   k groups, each tile goes to the nearest of k centers
+  spectral  k groups that are connected chains of neighbours, can find
+            groups of any shape
+  DBSCAN    groups are regions dense with tiles, the number of groups is
+            found by itself. eps = how close counts as neighbour, tiles in no
+            dense region are noise (-1, gray).
+
+Every cluster's most representative tile (closest to its center) and its
+average tile (pixel by pixel, plain and weighted towards the center) are sent
+too: the image view can show one of them in place of each tile of the
+cluster.
+
+The browser only gets coordinates and cluster numbers; it cuts the tiles out
+of the image itself (/api/image) and they glide to their new place whenever
+something changes.
+
+Export PDF saves the map as it is shown as a PDF, with the legend (map_pdf.py,
+/api/export/pdf).
+
+Run it and open http://127.0.0.1:5003
+"""
+
+import base64
+import os
+import io
+import itertools
+import math
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import numpy as np
+import torch
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from PIL import Image, ImageOps
+
+import map_pdf
+from autoencoder_model import read_config
+from embedders import find_models, load_embedder
+
+HERE = Path(__file__).resolve().parent
+WEB = HERE / "web"
+
+# QA2026_DEVICE=cpu falls back to the CPU if something does not run on Apple's MPS.
+def _pick_device():
+    forced = os.environ.get("QA2026_DEVICE")
+    if forced:
+        return torch.device(forced)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+DEVICE = _pick_device()
+
+ROOT_MODEL_FOLDER = os.environ.get(
+    "QA2026_MODELS",
+    str(Path(__file__).resolve().parents[3] / "05_classifiers" / "models"))
+DEFAULT_MODEL = "pretrained/dinov2_vits14"
+
+MAX_SIDE = 4096             # bigger uploads are scaled down to this longest side
+MAX_TILES = 6000            # more tiles than this: the page asks for bigger tiles or less overlap
+MIN_TILE = 8
+MAX_OVERLAP = 95            # percent
+KEEP_IMAGES = 4             # uploaded images kept in memory (with their embeddings)
+THUMBNAIL_SIZE = 96         # tiles in the PDF, at most this big when small on the page
+PREVIEW_SIZE = 320          # tile in the side panel
+AVERAGE_MAX_SIDE = 512      # average tiles of the clusters are sent at most this big
+BATCH_SIZE = 32
+PORT = 5003
+
+PROJECTIONS = {"tsne": "t-SNE", "umap": "UMAP", "pca": "PCA", "clusters": "clusters (grid)"}
+PREPS = {"l2": "L2-normalized / cosine", "standardize": "standardized", "none": "as they are"}
+CLUSTER_GAP = 0.4           # clusters grid: empty space between clusters, in rows
+CLUSTERINGS = {"kmeans": "k-means", "spectral": "spectral", "dbscan": "DBSCAN", "none": "none"}
+
+# Classifiers: every class also gets a dummy "tile" on the map, its anchor:
+# the logits of a tile the classifier is completely sure of, ANCHOR_LOGIT for
+# that class and 0 for the others (softmax: practically 1 and 0).
+ANCHOR_LOGIT = 20.0
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024     # uploads
+
+# One model in memory at a time. model_lock guards loading and using it, job_lock
+# makes the map computations run one after another (flask answers requests in
+# parallel threads).
+model_lock = threading.Lock()
+job_lock = threading.Lock()
+loaded = {"id": None, "embedder": None}
+
+models = {}                 # id -> {"id", "label", "kind", "path"}
+images = {}                 # token -> {"image": PIL RGB, "name"}, the last KEEP_IMAGES uploads
+embeddings = {}             # (model id, token, size, stride) -> {tile index: vector}
+projections = {}            # (model id, token, size, stride, prep, method, parameter) -> array [N, 2]
+jobs = {}                   # job id -> progress and result
+next_job = itertools.count(1)
+
+
+def scan_models() -> None:
+    found = {m["id"]: m for m in find_models(ROOT_MODEL_FOLDER)}
+    models.clear()
+    models.update(found)
+    print(f"{len(models)} models")
+
+
+# ---------------------------------------------------------------------------
+# The image and its tiles
+# ---------------------------------------------------------------------------
+
+def uploaded(token: str) -> Image.Image:
+    """410 (gone) when the server doesn't have it (restarted, or too many
+    uploads since): the page then uploads the image again."""
+    if token not in images:
+        abort(410, "upload the image again")
+    return images[token]["image"]
+
+
+def tiling(width: int, height: int, size: int, overlap: float) -> dict:
+    """Where the tiles are: tile k is at column k % cols, row k // cols, its
+    top left corner at (column * stride, row * stride)."""
+    size = max(1, min(max(MIN_TILE, int(size)), width, height))
+    overlap = min(max(float(overlap), 0.0), MAX_OVERLAP)
+    # rounded half up, like Math.round in the page (python's round goes to even)
+    stride = max(1, math.floor(size * (1 - overlap / 100) + 0.5))
+    cols = (width - size) // stride + 1
+    rows = (height - size) // stride + 1
+    return {"size": size, "overlap": overlap, "stride": stride, "cols": cols, "rows": rows,
+            "count": cols * rows, "width": width, "height": height}
+
+
+def tiling_of(args: dict) -> tuple[str, dict]:
+    """The image and tiling a request (json body or query) asks for"""
+    token = args.get("token", "")
+    image = uploaded(token)
+    return token, tiling(*image.size, int(args.get("size", 64)), float(args.get("overlap", 0)))
+
+
+def tile_box(t: dict, k: int) -> tuple[int, int, int, int]:
+    x, y = (k % t["cols"]) * t["stride"], (k // t["cols"]) * t["stride"]
+    return x, y, x + t["size"], y + t["size"]
+
+
+def tile_image(token: str, t: dict, k: int) -> Image.Image:
+    if not 0 <= k < t["count"]:
+        abort(404, f"no tile {k}")
+    return uploaded(token).crop(tile_box(t, k))
+
+
+def jpeg(image: Image.Image, size: int, quality: int = 85) -> bytes:
+    image = image.copy()
+    image.thumbnail((size, size))
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=quality)
+    return buffer.getvalue()
+
+
+def forget(token: str) -> None:
+    images.pop(token, None)
+    for cache in (embeddings, projections):
+        for key in [k for k in cache if k[1] == token]:
+            cache.pop(key)
+
+
+# ---------------------------------------------------------------------------
+# Embedding, projection, clustering
+# ---------------------------------------------------------------------------
+
+class Cancelled(Exception):
+    pass
+
+
+def load_model(model_id: str) -> None:
+    """Called with model_lock held."""
+    if loaded["id"] == model_id:
+        return
+    loaded["id"], loaded["embedder"] = None, None   # free the previous one first
+    if DEVICE.type == "cuda":
+        torch.cuda.empty_cache()
+    print(f"loading {model_id}")
+    loaded["embedder"] = load_embedder(models[model_id], DEVICE)
+    loaded["id"] = model_id
+    print(loaded["embedder"].description)
+
+
+def get_embeddings(model_id: str, token: str, t: dict, job: dict) -> np.ndarray:
+    """Vectors [tiles, D], computing only the ones not done before."""
+    done = embeddings.setdefault((model_id, token, t["size"], t["stride"]), {})
+    missing = [k for k in range(t["count"]) if k not in done]
+    if missing:
+        image = uploaded(token)
+        with model_lock:
+            job["stage"] = f"loading {models[model_id]['label']}"
+            load_model(model_id)
+            for start in range(0, len(missing), BATCH_SIZE):
+                if job["cancelled"]:
+                    raise Cancelled()
+                job["stage"] = f"embedding tiles {start}/{len(missing)}"
+                job["progress"] = start / len(missing)
+                batch = missing[start:start + BATCH_SIZE]
+                tiles = [image.crop(tile_box(t, k)) for k in batch]
+                vectors = loaded["embedder"].embed(tiles).flatten(1).numpy().astype(np.float32)
+                done.update(zip(batch, vectors))
+    return np.stack([done[k] for k in range(t["count"])])
+
+
+def class_names_of(model_id: str) -> list[str] | None:
+    """A classifier's class names (from its config.json), None for other models"""
+    model = models[model_id]
+    if model["kind"] != "classifier":
+        return None
+    return read_config(model["path"])["class_names"]
+
+
+def default_prep(model_id: str) -> str:
+    """How a model's vectors are best compared, used when the page asks for "default".
+
+      l2           CLIP, DINOv2: they are trained by comparing directions
+                   (cosine similarity), the length means little
+      none         classifiers: the logits as they are, how big they are is how
+                   sure the classifier is. VAE, VAE-GAN: the KL loss already
+                   keeps every dimension near mean 0, spread 1. Sparse: 0 means
+                   "unit off", keep it so.
+      standardize  the other autoencoders: the decoder reads the raw vector, so
+                   its length matters (no l2), but a few dimensions can have a
+                   much bigger range than the rest and would dominate distances
+    """
+    model = models[model_id]
+    if model["kind"] == "pretrained":
+        return "l2"
+    if model["kind"] == "classifier":
+        return "none"
+    try:
+        autoencoder_type = read_config(model["path"])["autoencoder_type"]
+    except (OSError, ValueError, KeyError):
+        return "standardize"
+    return "none" if autoencoder_type in ("vae", "vae_gan", "sparse") else "standardize"
+
+
+def prepare(x: np.ndarray, prep: str) -> np.ndarray:
+    """l2: every vector scaled to length 1, so only its direction counts
+           (distances become cosine distances, the usual for CLIP / DINOv2)
+       standardize: every dimension scaled to mean 0, spread 1 (z-score over
+           the tiles in the map), so all dimensions count equally
+       none: as the model gives them"""
+    if prep == "l2":
+        return x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-8)
+    if prep == "standardize":
+        return (x - x.mean(axis=0)) / np.maximum(x.std(axis=0), 1e-8)
+    return x
+
+
+def to_unit_square(xy: np.ndarray) -> np.ndarray:
+    """Center in 0..1 x 0..1, keeping the proportions."""
+    xy = xy - (xy.min(axis=0) + xy.max(axis=0)) / 2
+    extent = np.abs(xy).max() or 1.0
+    return xy / (2 * extent) + 0.5
+
+
+def project(x: np.ndarray, method: str, parameter: float) -> np.ndarray:
+    n = len(x)
+    if n < 4:       # nothing to learn from: spread them on a line
+        return to_unit_square(np.stack([np.arange(n), np.zeros(n)], axis=1).astype(float))
+    from sklearn.decomposition import PCA
+    if method == "pca":
+        xy = PCA(2).fit_transform(x)
+    elif method == "tsne":
+        from sklearn.manifold import TSNE
+        if x.shape[1] > 50:     # common practice: PCA to 50 first, faster and less noisy
+            x = PCA(min(50, n)).fit_transform(x)
+        xy = TSNE(2, perplexity=min(parameter, (n - 1) / 3), init="pca", learning_rate="auto",
+                  random_state=0).fit_transform(x)
+    elif method == "umap":
+        import umap         # slow to import (compiles with numba), only when needed
+        # a fixed random_state gives the same map every time, but runs on one
+        # core (n_jobs=1 says so, instead of a warning)
+        xy = umap.UMAP(n_neighbors=int(min(parameter, n - 1)), min_dist=0.1,
+                       random_state=0, n_jobs=1).fit_transform(x)
+    else:
+        raise ValueError(f"unknown projection {method}")
+    return to_unit_square(xy)
+
+
+def cluster(x: np.ndarray, method: str, k: int, eps: float, min_samples: int) -> np.ndarray:
+    """-> cluster number of every point, -1 = noise. Clusters are numbered by
+    size, 0 = the biggest."""
+    n = len(x)
+    if method == "none" or n < 2:
+        return np.zeros(n, dtype=int)
+    k = max(1, min(k, n))
+    if method == "kmeans":
+        from sklearn.cluster import KMeans
+        labels = KMeans(k, n_init="auto", random_state=0).fit_predict(x)
+    elif method == "spectral":
+        from sklearn.cluster import SpectralClustering
+        labels = SpectralClustering(k, affinity="nearest_neighbors", n_neighbors=min(10, n - 1),
+                                    assign_labels="cluster_qr", random_state=0).fit_predict(x)
+    elif method == "dbscan":
+        from sklearn.cluster import DBSCAN
+        labels = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(x)
+    else:
+        raise ValueError(f"unknown clustering {method}")
+
+    found = [c for c in np.unique(labels) if c >= 0]
+    by_size = sorted(found, key=lambda c: -(labels == c).sum())
+    renumber = {old: new for new, old in enumerate(by_size)}
+    return np.array([renumber.get(c, -1) for c in labels])
+
+
+def cluster_with_anchors(x: np.ndarray, anchor: np.ndarray, p: dict) -> np.ndarray:
+    """Cluster the tiles only, then give each class anchor the cluster whose
+    center is closest. The anchors are far out (extreme logits), clustered with
+    the tiles they would each take a cluster of their own."""
+    labels = np.full(len(x), -1)
+    labels[~anchor] = cluster(x[~anchor], p["clustering"], p["k"], p["eps"], p["min_samples"])
+    found = sorted(set(labels[~anchor].tolist()) - {-1})
+    if anchor.any() and found:
+        centers = np.stack([x[~anchor & (labels == c)].mean(axis=0) for c in found])
+        distance = np.linalg.norm(x[anchor][:, None] - centers[None], axis=2)
+        labels[anchor] = np.array(found)[distance.argmin(axis=1)]
+    return labels
+
+
+def representatives(x: np.ndarray, labels: np.ndarray, anchor: np.ndarray) -> list[int]:
+    """The most representative tile of every cluster (0, 1, ...): the one
+    closest to the cluster's center (the mean of its vectors), as in the
+    clusters grid. Class anchors don't count, noise has none."""
+    found = sorted(set(labels[~anchor].tolist()) - {-1})
+    out = []
+    for c in found:
+        members = np.flatnonzero((labels == c) & ~anchor)
+        distance = np.linalg.norm(x[members] - x[members].mean(axis=0), axis=1)
+        out.append(int(members[distance.argmin()]))
+    return out
+
+
+def data_url(pixels: np.ndarray) -> str:
+    image = Image.fromarray(np.clip(pixels + 0.5, 0, 255).astype(np.uint8))
+    image.thumbnail((AVERAGE_MAX_SIDE, AVERAGE_MAX_SIDE), Image.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=92)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+
+def cluster_averages(x: np.ndarray, labels: np.ndarray, anchor: np.ndarray, image: Image.Image,
+                     t: dict) -> dict[str, list[str]]:
+    """The average tile of every cluster (0, 1, ...), pixel by pixel, as data URLs:
+
+      average   every tile of the cluster counts the same
+      weighted  tiles close to the cluster's center (in the vectors) count
+                more: weight exp(-1/2 (d / m)^2), d = distance to the center,
+                m = the cluster's median d. Less blurred by the stray tiles
+                at the edge of the cluster.
+    """
+    pixels = np.asarray(image, dtype=np.float32)
+    out = {"average": [], "weighted": []}
+    for c in sorted(set(labels[~anchor].tolist()) - {-1}):
+        members = np.flatnonzero((labels == c) & ~anchor)
+        distance = np.linalg.norm(x[members] - x[members].mean(axis=0), axis=1)
+        weights = np.exp(-0.5 * (distance / max(float(np.median(distance)), 1e-8)) ** 2)
+        plain = np.zeros((t["size"], t["size"], 3), np.float32)
+        weighted = np.zeros_like(plain)
+        for k, w in zip(members, weights):
+            x0, y0, x1, y1 = tile_box(t, k)
+            tile = pixels[y0:y1, x0:x1]
+            plain += tile
+            weighted += w * tile
+        out["average"].append(data_url(plain / len(members)))
+        out["weighted"].append(data_url(weighted / weights.sum()))
+    return out
+
+
+def cluster_grid(x: np.ndarray, labels: np.ndarray, anchor: np.ndarray) -> tuple[np.ndarray, float]:
+    """The "clusters" layout: a grid of int(sqrt(N)) columns. Each cluster
+    starts on a new row (noise last) and fills as many rows as it needs, its
+    tiles sorted from the most representative to the least: by distance to
+    the cluster's center (the mean of its vectors), closest first. Class
+    anchors (anchor = True) come first in their cluster, like a heading, and
+    don't count for the center.
+    -> (positions in 0..1 x 0..1, size of a grid cell in the same units)"""
+    columns = max(1, int(math.sqrt(len(x))))
+    cells = np.zeros((len(x), 2))
+    row = 0.0
+    for c in sorted(set(labels.tolist()), key=lambda c: (c < 0, c)):
+        members = np.flatnonzero(labels == c)
+        tiles = members[~anchor[members]]
+        center = x[tiles if len(tiles) else members].mean(axis=0)
+        distance = np.linalg.norm(x[members] - center, axis=1)
+        members = members[np.lexsort((distance, ~anchor[members]))]    # anchors, then by distance
+        k = np.arange(len(members))
+        cells[members, 0] = k % columns
+        cells[members, 1] = row + k // columns
+        row += math.ceil(len(members) / columns) + CLUSTER_GAP
+    width, height = columns, row - CLUSTER_GAP
+    side = max(width, height)
+    # cell centers, the whole grid centered in a side x side square
+    xy = (cells + 0.5 + [(side - width) / 2, (side - height) / 2]) / side
+    return xy, 1 / side
+
+
+def run_job(job: dict, p: dict) -> None:
+    try:
+        with job_lock:
+            if job["cancelled"]:
+                raise Cancelled()
+            timings = {}
+            t = p["tiling"]
+            start = time.perf_counter()
+            raw = get_embeddings(p["model"], p["token"], t, job)
+            timings["embedding"] = time.perf_counter() - start
+
+            # Classifiers: one dummy "tile" per class, appended after the real
+            # ones, with ids -1, -2, ... (real tiles have their index, >= 0)
+            ids = list(range(t["count"]))
+            names = [f"tile {k} (row {k // t['cols'] + 1}, column {k % t['cols'] + 1})" for k in ids]
+            class_names = class_names_of(p["model"])
+            vectors = raw
+            if class_names:
+                vectors = np.concatenate([raw, ANCHOR_LOGIT * np.eye(len(class_names), dtype=np.float32)])
+                ids += [-(c + 1) for c in range(len(class_names))]
+                names += class_names
+            anchor = np.array([i < 0 for i in ids])
+
+            x = prepare(vectors, p["prep"])
+            grid = p["projection"] == "clusters"
+            cell = None
+
+            if not grid:
+                parameter = p["perplexity"] if p["projection"] == "tsne" else p["neighbors"]
+                key = (p["model"], p["token"], t["size"], t["stride"], p["prep"], p["projection"],
+                       parameter if p["projection"] != "pca" else None)
+                if key not in projections:
+                    job["stage"] = f"projecting ({PROJECTIONS[p['projection']]})"
+                    job["progress"] = 1.0
+                    start = time.perf_counter()
+                    projections[key] = project(x, p["projection"], parameter)
+                    timings["projection"] = time.perf_counter() - start
+                xy = projections[key]
+
+            if job["cancelled"]:
+                raise Cancelled()
+            job["stage"] = f"clustering ({CLUSTERINGS[p['clustering']]})"
+            start = time.perf_counter()
+            # the grid has no map yet: its clusters are always computed on the vectors
+            on_vectors = grid or p["cluster_on"] == "embedding"
+            labels = cluster_with_anchors(x if on_vectors else xy, anchor, p)
+            timings["clustering"] = time.perf_counter() - start
+            if grid:
+                xy, cell = cluster_grid(x, labels, anchor)
+            job["stage"] = "averaging the tiles of every cluster"
+            averages = cluster_averages(x, labels, anchor, uploaded(p["token"]), t)
+
+            job["result"] = {
+                "model": p["model"],
+                "token": p["token"],
+                "tiling": t,                        # size, stride, cols, rows, count, width, height
+                "projection": p["projection"],
+                "prep": p["prep"],                  # what was used ("default" resolved)
+                "prep_is_default": p["prep_is_default"],
+                "kind": models[p["model"]]["kind"],
+                "reconstructs": models[p["model"]]["kind"] == "autoencoder",
+                # the tiles, then the class anchors (< 0)
+                "indices": ids,
+                "names": names,
+                "class_names": class_names,         # classifiers only, else None
+                "anchor_logit": ANCHOR_LOGIT,
+                "xy": np.round(xy, 5).tolist(),
+                "cell": cell,                       # grid only: size of a cell, as xy
+                "labels": labels.tolist(),
+                # cluster -> its most representative tile (on the vectors, whatever was clustered)
+                "representatives": representatives(x, labels, anchor),
+                # cluster -> its average tile, plain and weighted (data URLs)
+                "averages": averages,
+                "dimensions": raw.shape[1],
+                # per dimension, for drawing a tile's vector relative to the image
+                "dim_mean": np.round(raw.mean(axis=0), 5).tolist(),
+                "dim_std": np.round(raw.std(axis=0), 5).tolist(),
+                "seconds": {k: round(v, 2) for k, v in timings.items()},
+            }
+            job["stage"] = "done"
+    except Cancelled:
+        job["stage"] = "cancelled"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        job["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        job["finished"] = True
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return send_from_directory(WEB, "tiles.html")
+
+
+@app.route("/<path:name>")
+def static_file(name):
+    return send_from_directory(WEB, name)
+
+
+@app.get("/api/options")
+def options():
+    model_list = [{**{k: m[k] for k in ("id", "label", "kind")}, "default_prep": default_prep(m["id"])}
+                  for m in models.values()]
+    return jsonify({
+        "models": model_list,
+        "projections": PROJECTIONS,
+        "clusterings": CLUSTERINGS,
+        "preps": PREPS,
+        "default_model": DEFAULT_MODEL if DEFAULT_MODEL in models else (model_list[0]["id"] if model_list else None),
+        "model_root": ROOT_MODEL_FOLDER,
+        "max_side": MAX_SIDE,
+        "max_tiles": MAX_TILES,
+        "min_tile": MIN_TILE,
+        "max_overlap": MAX_OVERLAP,
+    })
+
+
+@app.post("/api/rescan")
+def rescan():
+    scan_models()
+    return options()
+
+
+@app.post("/api/upload")
+def upload():
+    """An image from the page: kept in memory (EXIF rotation applied, at most
+    MAX_SIDE pixels along its longest side) until KEEP_IMAGES newer ones came."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        abort(400, "no file")
+    try:
+        image = ImageOps.exif_transpose(Image.open(file.stream)).convert("RGB")
+    except Exception as e:
+        abort(400, f"can't read {file.filename} as an image: {e}")
+    original = image.size
+    image.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    token = uuid.uuid4().hex
+    for old in list(images)[:-(KEEP_IMAGES - 1)]:
+        forget(old)
+    images[token] = {"image": image, "name": Path(file.filename).name}
+    return jsonify({"token": token, "name": images[token]["name"], "width": image.width,
+                    "height": image.height, "original": original})
+
+
+@app.get("/api/image/<token>")
+def image_file(token: str):
+    """The image as the server cuts it (maybe scaled down): the page cuts its
+    tiles out of this one, so both agree to the pixel."""
+    image = uploaded(token)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=92)
+    response = send_file(io.BytesIO(buffer.getvalue()), mimetype="image/jpeg")
+    response.headers["Cache-Control"] = "max-age=3600"
+    return response
+
+
+@app.post("/api/run")
+def run():
+    """Start computing a map. Returns a job id to poll with /api/job/<id>.
+    Any earlier job still running is cancelled."""
+    body = request.get_json()
+    token, t = tiling_of(body)
+    p = {
+        "model": body["model"],
+        "token": token,
+        "tiling": t,
+        "prep": body.get("prep", "default"),
+        "projection": body.get("projection", "tsne"),
+        "perplexity": float(body.get("perplexity", 30)),
+        "neighbors": float(body.get("neighbors", 15)),
+        "clustering": body.get("clustering", "kmeans"),
+        "cluster_on": body.get("cluster_on", "embedding"),
+        "k": int(body.get("k", 8)),
+        "eps": float(body.get("eps", 0.5)),
+        "min_samples": int(body.get("min_samples", 5)),
+    }
+    if p["model"] not in models:
+        abort(404, f"no model {p['model']}")
+    if t["count"] > MAX_TILES:
+        abort(400, f"{t['count']} tiles, at most {MAX_TILES}: make them bigger or overlap less")
+    if p["projection"] not in PROJECTIONS or p["clustering"] not in CLUSTERINGS:
+        abort(400, "unknown projection or clustering")
+    if p["prep"] != "default" and p["prep"] not in PREPS:
+        abort(400, f"unknown vector preparation {p['prep']}")
+    # anything other than "default" overrides the model's default
+    p["prep_is_default"] = p["prep"] == "default"
+    if p["prep_is_default"]:
+        p["prep"] = default_prep(p["model"])
+
+    for old in jobs.values():
+        old["cancelled"] = True
+    job_id = next(next_job)
+    jobs[job_id] = {"id": job_id, "stage": "waiting", "progress": 0.0, "cancelled": False,
+                    "finished": False, "result": None, "error": None}
+    threading.Thread(target=run_job, args=(jobs[job_id], p), daemon=True).start()
+    return jsonify({"job": job_id})
+
+
+@app.get("/api/job/<int:job_id>")
+def job_status(job_id: int):
+    if job_id not in jobs:
+        abort(404)
+    job = jobs[job_id]
+    if job["finished"]:
+        jobs.pop(job_id)    # the result is collected once
+    return jsonify({k: job[k] for k in ("id", "stage", "progress", "finished", "result", "error")})
+
+
+@app.get("/api/tile")
+def tile():
+    """One tile, at most PREVIEW_SIZE pixels"""
+    token, t = tiling_of(request.args)
+    image = tile_image(token, t, int(request.args["i"]))
+    return send_file(io.BytesIO(jpeg(image, PREVIEW_SIZE, 90)), mimetype="image/jpeg")
+
+
+@app.get("/api/embedding")
+def embedding():
+    """The vector of one tile (as the model gives it)"""
+    token, t = tiling_of(request.args)
+    done = embeddings.get((request.args["model"], token, t["size"], t["stride"]), {})
+    vector = done.get(int(request.args["i"]))
+    if vector is None:
+        abort(404, "not computed yet")
+    return jsonify({"values": np.round(vector, 5).tolist()})
+
+
+@app.get("/api/reconstruction")
+def reconstruction():
+    """What an autoencoder makes of one tile (PNG, at the model's size)"""
+    model_id = request.args["model"]
+    if models.get(model_id, {}).get("kind") != "autoencoder":
+        abort(400, "only autoencoders reconstruct")
+    token, t = tiling_of(request.args)
+    image = tile_image(token, t, int(request.args["i"]))
+    with model_lock:
+        load_model(model_id)
+        image = loaded["embedder"].reconstruct([image])[0]
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return send_file(io.BytesIO(buffer.getvalue()), mimetype="image/png")
+
+
+def cover_jpeg(image: Image.Image, w: float, h: float, side: int) -> bytes:
+    """The image cropped to the proportions of a w x h box and scaled to `side`
+    pixels along its longer side, as JPEG (CSS background-size: cover)"""
+    scale = side / max(w, h, 1e-6)
+    size = (max(1, round(w * scale)), max(1, round(h * scale)))
+    buffer = io.BytesIO()
+    ImageOps.fit(image.convert("RGB"), size, Image.LANCZOS).save(buffer, "JPEG", quality=88)
+    return buffer.getvalue()
+
+
+@app.post("/api/export/pdf")
+def export_pdf():
+    """The map as the page shows it, as a PDF. The page sends every mark it
+    draws (see map_pdf.py); here the tiles get their pictures: about 2 image
+    pixels per pixel on the screen, so they stay sharp when printed."""
+    spec = request.get_json()
+    token, t = tiling_of(spec)
+    for mark in spec["marks"]:
+        if mark["kind"] != "image":
+            continue
+        side = min(PREVIEW_SIZE, max(THUMBNAIL_SIZE, round(2 * max(mark["w"], mark["h"]))))
+        mark["jpeg"] = cover_jpeg(tile_image(token, t, int(mark["i"])), mark["w"], mark["h"], side)
+    return send_file(io.BytesIO(map_pdf.make_pdf(spec)), mimetype="application/pdf")
+
+
+if __name__ == "__main__":
+    print(f"device: {DEVICE}")
+    scan_models()
+    # no debug reloader: it would start the app (and load the model) twice
+    app.run(port=PORT, threaded=True)

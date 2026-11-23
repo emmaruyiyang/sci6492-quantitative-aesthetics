@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.venv/
+env_config.json
+results/
+src/uploads/

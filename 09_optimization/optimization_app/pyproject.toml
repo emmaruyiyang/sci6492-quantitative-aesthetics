@@ -1,0 +1,62 @@
+[project]
+name = "optimization-app"
+version = "0.1.0"
+description = "Browser front end for CLIP-guided field optimization"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy",
+    "pillow",
+    "opencv-python",
+    "scipy>=1.18.1",
+    "flask>=3.0",
+    "rhino3dm>=8.35.0",
+    "vtk>=9.7.2",
+    "open_clip_torch>=3.0",
+    "transformers>=5.19.0",
+    "diffusers>=0.42.1",
+]
+
+# Run:  uv run python src/optimization_app.py   (then http://localhost:5001)
+#
+# PyTorch build, chosen per machine (pyproject markers can't tell AMD from NVIDIA):
+#   NVIDIA (Windows/Linux) and macOS (MPS): the default; plain `uv sync` / `uv run`
+#   AMD ROCm (Linux):  uv sync --no-default-groups --group rocm
+#                      then run with `uv run --no-sync ...` or .venv/bin/python
+#                      (a plain `uv run` re-syncs to the default cuda group)
+[dependency-groups]
+cuda = ["torch>=2.9", "torchvision>=0.24"]
+# pinned: download.pytorch.org has no range requests, so every version uv
+# backtracks through streams the whole multi-GB wheel
+rocm = ["torch==2.14.1", "torchvision==0.29.1", "triton-rocm; sys_platform == 'linux'"]
+
+[tool.uv]
+package = false
+default-groups = ["cuda"]
+conflicts = [[{ group = "cuda" }, { group = "rocm" }]]
+
+# PyTorch built against CUDA 13.0
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+# PyTorch built against ROCm 7.2 (includes gfx1151 / Strix Halo)
+[[tool.uv.index]]
+name = "pytorch-rocm72"
+url = "https://download.pytorch.org/whl/rocm7.2"
+explicit = true
+
+# cuda group: CUDA wheels on Linux/Windows; macOS falls back to PyPI (MPS-enabled builds)
+# rocm group: ROCm wheels on Linux
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", group = "cuda", marker = "sys_platform != 'darwin'" },
+    { index = "pytorch-rocm72", group = "rocm", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", group = "cuda", marker = "sys_platform != 'darwin'" },
+    { index = "pytorch-rocm72", group = "rocm", marker = "sys_platform == 'linux'" },
+]
+triton-rocm = [
+    { index = "pytorch-rocm72", group = "rocm", marker = "sys_platform == 'linux'" },
+]

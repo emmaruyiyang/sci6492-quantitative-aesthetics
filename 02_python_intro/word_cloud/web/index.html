@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic Constellation</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">Semantic Constellation</div>
+
+  <form id="query-form">
+    <input id="word" type="text" value="architecture" placeholder="Search a word" autocomplete="off" spellcheck="false" required>
+    <button type="submit">Explore</button>
+  </form>
+</header>
+
+<section class="toolbar">
+  <div class="control">
+    <span class="label">Words</span>
+    <input id="top_n" type="range" min="10" max="80" value="36">
+    <output id="top_n_out">36</output>
+  </div>
+
+  <div class="control">
+    <span class="label">Layout</span>
+    <div class="segmented" id="layout" data-value="radial">
+      <button type="button" data-value="radial">Radial</button>
+      <button type="button" data-value="pca">PCA</button>
+    </div>
+  </div>
+
+  <div class="control">
+    <span class="label">Encoding</span>
+    <div class="segmented" id="mode" data-value="similarity">
+      <button type="button" data-value="similarity">Similarity</button>
+      <button type="button" data-value="cluster">Clusters</button>
+      <button type="button" data-value="semantic">Color words</button>
+    </div>
+  </div>
+</section>
+
+<nav id="trail"></nav>
+
+<main>
+  <svg id="cloud" role="img" aria-label="word map"></svg>
+  <aside id="legend"></aside>
+  <div id="tooltip" hidden></div>
+  <p id="message"></p>
+  <p id="model-note">Model · <span id="model-name">…</span></p>
+</main>
+
+<script src="/web/app.js"></script>
+</body>
+</html>

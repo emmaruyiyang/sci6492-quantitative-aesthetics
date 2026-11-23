@@ -1,0 +1,1016 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLIP Optimization</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="field">Field</button>
+    <button type="button" role="tab" data-tab="model">Model</button>
+    <button type="button" role="tab" data-tab="match">Match</button>
+    <button type="button" role="tab" data-tab="regularization">Regularization</button>
+    <button type="button" role="tab" data-tab="augmentation">Augmentation</button>
+    <button type="button" role="tab" data-tab="optimization">Optimization</button>
+    <button type="button" role="tab" data-tab="defaults">Defaults</button>
+    <button type="button" role="tab" data-tab="status" title="The server's warnings and errors since the last run started. Orange: there are warnings. Red: an error occurred">Status</button>
+  </nav>
+
+  <section class="tab-panel" role="tabpanel" data-tab="field">
+    <label>Field type <select data-key="field_type" id="field-type"></select></label>
+    <div class="row">
+      <label>Canvas W <input type="number" data-key="canvas" data-idx="0" min="8" step="8"></label>
+      <label>Canvas H <input type="number" data-key="canvas" data-idx="1" min="8" step="8"></label>
+    </div>
+    <label>Start image <input type="text" data-key="start_image" id="start-image" placeholder="path (empty = mid grey)"></label>
+    <label>Fit to canvas <select data-key="start_image_fit" id="start-image-fit"></select></label>
+    <label class="only" data-fields="PIXELS_COLOR PIXELS_GRAY SHAPES RELIEF LEVELSET PIXEL_PATCHES GAUSSIANS VAE CONVOLUTIONS REVOLUTION MESH_TEXTURE GAUSSIANS_3D VOXELS"
+           title="What the canvas starts as; the start image stays the match target. Relief: each shape's height starts as the start image's mean luminance under it, 0.5, or noise. Surface of revolution: what its texture starts as, when it has one. Mesh texture: what the texture starts as (bump: the start image's luminance is the height). 3D gaussian splats: their colours (start: the start image where each centre falls in the canvas camera's view). Voxels: the colour volume, the same way (the density has its own start)">Initialize canvas
+      <select data-key="canvas_init" id="canvas-init"></select></label>
+    <label class="only" data-fields="PIXELS_COLOR PIXELS_GRAY SHAPES RELIEF LEVELSET PIXEL_PATCHES GAUSSIANS VAE CONVOLUTIONS REVOLUTION MESH_TEXTURE GAUSSIANS_3D VOXELS"
+           title="Noise init: std in logit space around mid-grey (0.4 -> ~0.4..0.6, 1.5 -> ~0.05..0.95). VAE: std of the noise added to mid-grey's latent (unit-variance units; ~1 = a random draw from the prior)">Noise std
+      <input type="number" data-key="canvas_noise_std" step="0.1" min="0"></label>
+    <div class="row">
+      <button type="button" id="start-image-upload">Upload</button>
+      <button type="button" id="start-image-random" title="Random image from the same folder">Random</button>
+    </div>
+    <input type="file" id="start-image-file" accept="image/*" hidden>
+    <img id="start-image-thumb" class="thumb" alt="" hidden>
+
+    <div class="only" data-fields="PIXELS_COLOR PIXELS_GRAY">
+      <div class="row">
+        <label>Pixel src W <input type="number" data-key="pixel_src" data-idx="0" min="8"></label>
+        <label>Pixel src H <input type="number" data-key="pixel_src" data-idx="1" min="8"></label>
+      </div>
+      <div class="row">
+        <label>Pyramid levels <input type="number" data-key="pyramid_levels" min="1" max="8"></label>
+        <label title="LR x this per level towards the finest. 1 = same everywhere; ~0.5 = coarse-to-fine (better when generating from gray/noise)">LR decay <input type="number" data-key="pyramid_lr_decay" step="0.1" min="0.05" max="1"></label>
+      </div>
+      <label class="inline" title="0 = off. Else every channel of the canvas goes through sigmoid((c - 0.5) x contrast), rescaled so 0 and 1 stay put: ~10 and more push the pixels to black / white">Contrast sigmoid
+        <input type="number" data-key="pixel_contrast" step="1" min="0"></label>
+      <div class="only" data-fields="PIXELS_GRAY"><div class="row">
+        <label title="The mean brightness the canvas is pulled to (empty = off): 1 = all white, 0 = all black, 0.5 = mid grey, or half black / half white with a high contrast">Coverage
+          <input type="number" data-key="pixel_coverage" step="0.05" min="0" max="1" placeholder="off"></label>
+        <label title="x (mean - coverage)^2">Coverage weight
+          <input type="number" data-key="pixel_coverage_weight" step="1" min="0"></label>
+      </div></div>
+    </div>
+
+    <div class="only" data-fields="LEVELSET">
+      <div class="muted small">Layers over the background, in order (later on top). Each layer's tensor is resized to the canvas, through its contrast sigmoid (0 = linear), and is the alpha of its colour. Initialize canvas: start = layer i is the level set luminance &gt; (i+1)/(layers+1).</div>
+      <div class="row">
+        <label>Background <input type="color" id="levelset-background"></label>
+        <label class="check" title="optimize the background colour"><input type="checkbox" id="levelset-optimize-background"> optimize</label>
+      </div>
+      <div class="bg-image-slot" data-bg-slot="LEVELSET"></div>
+      <div class="row">
+        <label>Layers<input type="number" id="levelset-count" min="1" max="64"></label>
+      </div>
+      <div id="levelset-list" class="levelset-list" title="W x H: the layer tensor's resolution. color / &alpha;: its RGBA. k: contrast sigmoid factor (0 = linear). checkbox: optimized (unchecked = frozen). cover / w: coverage budget (0..1, empty = free) and its weight"></div>
+    </div>
+
+    <div class="only" data-fields="FUNCTION_STACK">
+      <div class="muted small">Curves over the background, in order (later on top). Each is a base line or circle, moved by its offset and bent by superimposed waves whose amplitudes, phases and frequencies are optimized. Lengths are fractions of the canvas' short side.</div>
+      <label title="line: the curve is a height over the canvas' width, filled below. circle: it is a radius around the canvas centre, filled inside">Base shape <select id="function-kind"></select></label>
+      <div class="row">
+        <label title="Width scale of the sigmoid edges, in canvas pixels. Softer edges reach further, so the curves get more gradient">Softness (px) <input type="number" id="function-softness" step="0.5" min="0.05"></label>
+        <label title="Learning rate of offsets and amplitudes, as a multiple of the learning rate (phases, frequencies and colours use it as is)">Shape LR &times; <input type="number" id="function-shape-lr" step="0.1" min="0"></label>
+      </div>
+      <div id="function-list" class="levelset-list"></div>
+      <button type="button" id="function-add" title="Add a function on top, a copy of the last one">+ Add function</button>
+    </div>
+
+    <div class="only surface-panel" data-fields="REVOLUTION" id="revolution-panel">
+      <div class="surface-preview" title="The surface as the run starts; with a texture, at three angles. Updates as you edit">
+        <img id="revolution-preview" alt="">
+        <div id="revolution-preview-note" class="muted small"></div>
+      </div>
+      <div class="muted small">A half profile turned around the vertical axis, seen straight on by an orthographic camera. Radius = base radius + the profile's offset along t, 0 at the bottom, 1 at the top. Lengths are fractions of the canvas' short side.</div>
+
+      <h2>Profile</h2>
+      <label>Mode <select data-rev="mode" id="revolution-mode"></select></label>
+      <div class="row">
+        <label>Base radius <input type="number" data-rev="radius" step="0.05" min="0.001"></label>
+        <label>Height <input type="number" data-rev="height" step="0.05" min="0.001"></label>
+      </div>
+      <div class="row">
+        <label title="Width scale of the silhouette's sigmoid edge, in canvas pixels. Softer edges reach further, so the profile gets more gradient">Softness (px) <input type="number" data-rev="softness" step="0.5" min="0.05"></label>
+        <label title="Learning rate of the profile's parameters, as a multiple of the learning rate (the texture and colours use it as is)">Shape LR &times; <input type="number" data-rev="shape_lr" step="0.1" min="0"></label>
+      </div>
+      <div class="row">
+        <label class="check" title="Optimize the profile; off: only the texture and colours change"><input type="checkbox" data-rev="optimize_profile"> optimize profile</label>
+        <label class="check" title="Optimize the base radius as well"><input type="checkbox" data-rev="optimize_radius"> optimize radius</label>
+      </div>
+
+      <div class="rev-mode" data-mode="points">
+        <div class="row">
+          <label title="Points evenly along t. A new one copies the last">Points <input type="number" id="revolution-point-count" min="2"></label>
+          <label title="Set every point's interpolation">All <select id="revolution-point-all"></select></label>
+        </div>
+        <div id="revolution-points" class="levelset-list" title="Point 1 is the bottom of the surface. offset: added to the base radius. The method is how the profile goes on from this point to the next: linear, nn (the nearest of the two: a step halfway), spline (Catmull-Rom through its neighbours)"></div>
+      </div>
+
+      <div class="rev-mode" data-mode="waves">
+        <div id="revolution-waves" class="levelset-list"></div>
+        <button type="button" id="revolution-wave-add" title="Add a wave, a copy of the last one">+ Add wave</button>
+      </div>
+
+      <div class="rev-mode" data-mode="parametric">
+        <label id="revolution-formula-label">Offset(t) = <input type="text" id="revolution-formula" spellcheck="false" autocomplete="off"></label>
+        <div id="revolution-formula-note" class="muted small"></div>
+        <div id="revolution-parameters" class="levelset-list" title="Every name in the formula that isn't t, pi or a function. opt: optimized from this value; unchecked = frozen at it"></div>
+      </div>
+
+      <h2>Texture</h2>
+      <label class="check" title="An image mapped around the surface, optimized too. It starts per Initialize canvas (above)"><input type="checkbox" data-rev="texture.enabled"> Enable texture</label>
+      <div id="revolution-texture-options">
+        <label class="check" title="One channel instead of three"><input type="checkbox" data-rev="texture.monochrome"> Monochrome</label>
+        <div class="row">
+          <label title="Around the surface">Width <input type="number" data-rev="texture.resolution" data-idx="0" min="8" step="64"></label>
+          <label title="Along its height">Height <input type="number" data-rev="texture.resolution" data-idx="1" min="8" step="64"></label>
+        </div>
+        <div class="row">
+          <label title="Levels of the texture's Laplacian pyramid: 1 = one tensor; each more adds one at half the resolution, for broad changes">Pyramid levels <input type="number" data-rev="texture.levels" min="1" max="8"></label>
+          <label title="LR x this per level towards the finest. 1 = same everywhere">LR decay <input type="number" data-rev="texture.lr_decay" step="0.1" min="0.05" max="1"></label>
+        </div>
+        <label title="Angles the models see each step, evenly around the surface from a random start. The random transforms are split between them, so more angles don't grow the batch">Angles per step <input type="number" data-rev="texture.views" min="1" max="32"></label>
+      </div>
+      <label title="The canvas shows the surface turned by this much; it is also what the image match terms compare">Canvas angle&deg; <input type="number" data-rev="canvas_angle" step="15"></label>
+
+      <h2>Shading</h2>
+      <label title="lit: a light on the normals. flat: the colour or texture as it is (no texture: the bare silhouette)">Mode <select data-rev="shading.mode" id="revolution-shading"></select></label>
+      <div class="row">
+        <label title="0, 0 = from the camera; positive = from the right">Azimuth&deg; <input type="number" data-rev="shading.azimuth" step="5"></label>
+        <label title="Positive = from above">Elevation&deg; <input type="number" data-rev="shading.elevation" step="5"></label>
+        <label>Ambient <input type="number" data-rev="shading.ambient" step="0.05" min="0" max="1"></label>
+      </div>
+      <div class="row" id="revolution-color-row">
+        <label>Surface <input type="color" data-rev="color"></label>
+        <label class="check" title="Optimize the surface's colour"><input type="checkbox" data-rev="optimize_color"> optimize</label>
+      </div>
+
+      <h2>Rhino export</h2>
+      <div class="muted small">Saved with the run and with snapshots: a mesh with texture coordinates, its texture referenced and embedded.</div>
+      <div class="row">
+        <label title="Faces along the height">Rows <input type="number" data-rev="mesh.rows" min="2" max="1024"></label>
+        <label title="Faces around the axis">Segments <input type="number" data-rev="mesh.segments" min="8" max="1024"></label>
+      </div>
+      <h2>Current values</h2>
+      <pre id="revolution-current" class="small"></pre>
+    </div>
+
+    <div class="only surface-panel" data-fields="MESH_TEXTURE" id="mesh-panel">
+      <div class="surface-preview" title="Every view as the run starts (the texture's start, the light unjittered); the canvas view is outlined. Updates as you edit">
+        <img id="mesh-preview" alt="">
+        <div id="mesh-preview-note" class="muted small"></div>
+      </div>
+      <div class="muted small">A Rhino mesh, prerendered once from fixed cameras into float maps (mask, world xyz, normals, uv). Every step the texture is sampled through them and lit; only the texture (and the colours) change. Breps and extrusions count with their render meshes: save the file from a shaded view, or _Mesh them.</div>
+
+      <h2>Mesh</h2>
+      <label>Mesh <select id="mesh-select"></select></label>
+      <input type="text" data-mesh="path" id="mesh-path" placeholder=".3dm path">
+      <button type="button" id="mesh-upload">Upload .3dm</button>
+      <input type="file" id="mesh-file" accept=".3dm" hidden>
+      <div class="row">
+        <label title="mesh: the mesh's own texture coordinates (every object needs them; outside 0..1 they tile). planar: as the Front view shows the mesh. cylindrical / spherical: around the vertical axis through the bounding box's centre, u = 1/2 at the front; computed per pixel, so their seam doesn't smear">UVs <select data-mesh="uv" id="mesh-uv"></select></label>
+        <label title="smooth: the mesh's vertex normals, interpolated. flat: one per face, faceted">Normals <select data-mesh="normals" id="mesh-normals"></select></label>
+      </div>
+
+      <h2>Texture</h2>
+      <label title="color: the texture is the RGB colour of the surface. monochrome: one channel, its gray. bump: one channel, a height map over the surface that tilts the normals; the surface is the material colour">Mode <select data-mesh="mode" id="mesh-mode"></select></label>
+      <div class="row">
+        <label>Width <input type="number" data-mesh="texture.resolution" data-idx="0" min="8" step="64"></label>
+        <label>Height <input type="number" data-mesh="texture.resolution" data-idx="1" min="8" step="64"></label>
+      </div>
+      <div class="row">
+        <label title="Levels of the texture's Laplacian pyramid: 1 = one tensor; each more adds one at half the resolution, for broad changes">Pyramid levels <input type="number" data-mesh="texture.levels" min="1" max="8"></label>
+        <label title="LR x this per level towards the finest. 1 = same everywhere">LR decay <input type="number" data-mesh="texture.lr_decay" step="0.1" min="0.05" max="1"></label>
+      </div>
+      <div id="mesh-bump-options">
+        <div class="row">
+          <label title="The height of a texture value of 1, as % of the mesh's bounding radius. Measured against how far one screen pixel reaches on the surface: larger = steeper">Bump depth % <input type="number" data-mesh="bump_depth" step="0.1" min="0"></label>
+          <label title="The surface's colour under the bumps">Material <input type="color" data-mesh="color"></label>
+          <label class="check" title="Optimize the material colour"><input type="checkbox" data-mesh="optimize_color"> optimize</label>
+        </div>
+      </div>
+
+      <h2>Cameras</h2>
+      <div class="row">
+        <label title="Cameras, evenly around the mesh's bounding box centre">Views <input type="number" data-mesh="views.count" min="1" max="32"></label>
+        <label title="Views the models see each step, picked at random. The random transforms are split between them, so more views don't grow the batch">Per step <input type="number" data-mesh="views.per_step" min="1" max="32"></label>
+        <label title="The view shown as the canvas, 0 = the first (at the start azimuth). The image match terms compare it">Canvas view <input type="number" data-mesh="views.canvas_view" min="0" max="31"></label>
+      </div>
+      <div class="row">
+        <label title="The first camera's; the others follow evenly around. 0 = Rhino's Front view (from -y), 90 = its Right view">Azimuth&deg; <input type="number" data-mesh="views.azimuth" step="15"></label>
+        <label title="Above the bounding box centre">Elevation&deg; <input type="number" data-mesh="views.elevation" step="5"></label>
+        <label title="Every other camera is this much higher, the rest this much lower">&plusmn; <input type="number" data-mesh="views.elevation_variation" step="5" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="Field of view across the canvas' short side. 0 = orthographic">FOV&deg; <input type="number" data-mesh="views.fov" step="5" min="0"></label>
+        <label title="How much of the canvas' short side the mesh's bounding sphere fills: 1 = all of it (the mesh itself usually less)">Fill <input type="number" data-mesh="views.fill" step="0.05" min="0.05"></label>
+        <label title="Rendered at the canvas size x this along each side, then averaged down: smooth silhouettes, at this squared in memory and time">Supersample <input type="number" data-mesh="supersample" min="1" max="4"></label>
+      </div>
+
+      <h2>Shading</h2>
+      <div class="row">
+        <label title="lit: one directional light on the normals (bump needs it). flat: the texture as it is">Mode <select data-mesh="shading.mode" id="mesh-shading"></select></label>
+        <label title="camera: the light keeps its place relative to each camera (0, 0 = from the camera; positive azimuth = from the right). world: fixed around the mesh (azimuth 0 = from the front, 90 = from the right)">Light <select data-mesh="shading.space" id="mesh-light-space"></select></label>
+      </div>
+      <div class="row mesh-lit">
+        <label>Azimuth&deg; <input type="number" data-mesh="shading.azimuth" step="5"></label>
+        <label title="Positive = from above">Elevation&deg; <input type="number" data-mesh="shading.elevation" step="5"></label>
+        <label>Ambient <input type="number" data-mesh="shading.ambient" step="0.05" min="0" max="1"></label>
+      </div>
+      <div class="row mesh-lit">
+        <label title="Blinn-Phong highlight, added on top (0 = matte)">Specular <input type="number" data-mesh="shading.specular" step="0.05" min="0"></label>
+        <label>Shininess <input type="number" data-mesh="shading.shininess" step="4" min="1"></label>
+        <label title="The models' views: the light moves by up to this much, in azimuth and elevation, per view and step, so the texture can't just paint the light in. The canvas keeps it still">Jitter&deg; <input type="number" data-mesh="shading.jitter" step="5" min="0"></label>
+      </div>
+
+      <h2>Rhino export</h2>
+      <div class="muted small">Saved with the run and with snapshots: the mesh with its uvs and the texture as its bitmap (bump: its bump map), referenced and embedded. Projected cylindrical / spherical uvs are per vertex there, so they smear across the seam.</div>
+      <h2>Current values</h2>
+      <pre id="mesh-current" class="small"></pre>
+    </div>
+
+    <div class="only surface-panel" data-fields="GAUSSIANS_3D" id="g3d-panel">
+      <div class="surface-preview" title="Every camera's view of the scene as a run with this seed starts; the canvas view is outlined. Updates as you edit">
+        <img id="g3d-preview" alt="">
+        <div id="g3d-preview-note" class="muted small"></div>
+      </div>
+      <div class="muted small">Anisotropic 3D Gaussians -- centre, three scales, rotation, opacity, colour, all optimized -- seen by cameras orbiting a unit sphere and composited front to back per pixel, as in 3D Gaussian splatting. Colours don't change with the view; the count is fixed. Lengths are in scene radii.</div>
+
+      <h2>Splats</h2>
+      <div class="row">
+        <label>Count <input type="number" data-g3d="count" min="1" step="100"></label>
+        <label class="check" title="One gray per splat instead of RGB"><input type="checkbox" data-g3d="monochrome"> Monochrome</label>
+      </div>
+      <div class="row">
+        <label title="Radius of the ball the centres start in, uniformly">Spread <input type="number" data-g3d="spread" step="0.05" min="0"></label>
+        <label title="Starting std along each axis (varied a little per splat)">Size <input type="number" data-g3d="size" step="0.01" min="0.0001"></label>
+        <label title="The largest std along any axis: the scales are a sigmoid up to this">Max size <input type="number" data-g3d="max_size" step="0.05" min="0.001"></label>
+      </div>
+      <div class="row">
+        <label title="Every splat's starting opacity">Opacity <input type="number" data-g3d="opacity" step="0.05" min="0.01" max="0.99"></label>
+        <label title="Learning rate of the centres, as a multiple of the learning rate (they move in scene radii)">Position LR &times; <input type="number" data-g3d="position_lr" step="0.1" min="0"></label>
+        <label title="Learning rate of the scales and rotations, as a multiple of the learning rate">Shape LR &times; <input type="number" data-g3d="shape_lr" step="0.1" min="0"></label>
+      </div>
+      <label title="The largest pixel window (half size) a splat is drawn in: a bigger splat on screen is cut off at it. Memory and time grow with its square for the splats that big">Max window px <input type="number" data-g3d="max_radius" min="4" max="256" step="8"></label>
+
+      <h2>Cameras</h2>
+      <div class="row">
+        <label title="Cameras, evenly around the unit sphere">Views <input type="number" data-g3d="views.count" min="1" max="32"></label>
+        <label title="Views the models see each step, picked at random. The random transforms are split between them, so more views don't grow the batch">Per step <input type="number" data-g3d="views.per_step" min="1" max="32"></label>
+        <label title="The view shown as the canvas, 0 = the first (at the start azimuth). The image match terms compare it, and the start image colours the splats from it">Canvas view <input type="number" data-g3d="views.canvas_view" min="0" max="31"></label>
+      </div>
+      <div class="row">
+        <label title="The first camera's; the others follow evenly around. 0 = Rhino's Front view (from -y), 90 = its Right view">Azimuth&deg; <input type="number" data-g3d="views.azimuth" step="15"></label>
+        <label>Elevation&deg; <input type="number" data-g3d="views.elevation" step="5"></label>
+        <label title="Every other camera is this much higher, the rest this much lower">&plusmn; <input type="number" data-g3d="views.elevation_variation" step="5" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="Field of view across the canvas' short side. 0 = orthographic">FOV&deg; <input type="number" data-g3d="views.fov" step="5" min="0"></label>
+        <label title="How much of the canvas' short side the unit sphere fills">Fill <input type="number" data-g3d="views.fill" step="0.05" min="0.05"></label>
+        <label title="The models' cameras move by up to this much, in azimuth and elevation, per view and step, so the scene has to hold up between the cameras too. The canvas keeps still">Jitter&deg; <input type="number" data-g3d="jitter" step="5" min="0"></label>
+      </div>
+
+      <h2>Export</h2>
+      <div class="muted small">Saved with the run and with snapshots: gaussians.ply in the 3D Gaussian splatting layout (splat viewers open it) and gaussians.3dm, the centres as a point cloud in their colours, with the isosurface of the splats' summed density as a vertex-coloured mesh (VTK's marching cubes).</div>
+      <div class="row">
+        <label title="Voxels along the longest side of the box the splats fill, for the isosurface. 0 = no isosurface">Mesh resolution <input type="number" data-g3d="mesh.resolution" min="0" max="512" step="16"></label>
+        <label title="The summed density (opacity x Gaussian, added up) the isosurface is drawn at: 0.5 = where the splats' opacities add up to half">Level <input type="number" data-g3d="mesh.level" step="0.05" min="0.001"></label>
+      </div>
+      <h2>Current values</h2>
+      <pre id="g3d-current" class="small"></pre>
+    </div>
+
+    <div class="only surface-panel" data-fields="VOXELS ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS" id="vol-preview-panel">
+      <div class="surface-preview" title="Every camera's view of the volume as a run with this seed starts; the canvas view is outlined. Updates as you edit">
+        <img id="vol-preview" alt="">
+        <div id="vol-preview-note" class="muted small"></div>
+      </div>
+      <div class="muted small">Rendered by dvolume's volume renderer in the cube -1..1: each view samples its frustum in depth layers and composites them back to front. Needs dvolume_folder in env_config.json.</div>
+    </div>
+
+    <div class="only surface-panel" data-fields="VOXELS" id="vox-panel">
+      <div class="muted small">A voxel volume -- a density and a colour, each a Laplacian pyramid of 3D tensors, all optimized.</div>
+      <h2>Volume</h2>
+      <div class="row">
+        <label title="Levels of the pyramid: 1 = one volume; each more adds one at half the resolution, for broad changes">Pyramid levels <input type="number" data-vox="levels" min="1" max="7"></label>
+        <label title="LR x this per level towards the finest (the coarsest gets the full LR). 1 = same everywhere; ~0.5 = coarse-to-fine">LR decay <input type="number" data-vox="lr_decay" step="0.1" min="0.05" max="1"></label>
+      </div>
+      <label title="color: an RGB colour volume. monochrome: a gray one. density: no colour volume, the material colour (below)">Mode <select data-vox="mode" id="vox-mode"></select></label>
+      <div class="row">
+        <label title="How the density starts. ball: a solid ball. noise: smooth random blobs (the seed's). empty. mesh: a .3dm's meshes, fitted into the cube (dvolume's signed distance)">Start <select data-vox="init" id="vox-init"></select></label>
+        <label class="vox-init-ball" title="Radius of the starting ball, in the cube's half sides">Radius <input type="number" data-vox="init_radius" step="0.05" min="0.01"></label>
+      </div>
+      <div class="vox-init-mesh">
+        <label>Mesh <select id="vox-mesh-select"></select></label>
+        <input type="text" data-vox="init_mesh" id="vox-mesh-path" placeholder=".3dm path (its meshes)">
+        <button type="button" id="vox-mesh-upload">Upload .3dm</button>
+        <input type="file" id="vox-mesh-file" accept=".3dm" hidden>
+      </div>
+      <div class="row">
+        <label title="Weight of the density's 3D total variation (mean difference between neighbouring voxels), a loss term: smoother, more solid volumes. 0 = off">Smoothness <input type="number" data-vox="smoothness" step="0.05" min="0"></label>
+        <label title="Every this many steps, between steps (no gradient), the finest level of the density is moved towards dvolume's box blur of it (VolumeField.smooth). 0 = never">Blur every <input type="number" data-vox="blur.every" min="0" step="1"></label>
+      </div>
+      <div class="row vox-blur">
+        <label title="The box blur's size, in voxels (odd)">Kernel <input type="number" data-vox="blur.kernel" min="3" max="15" step="2"></label>
+        <label title="How far towards the blur: 1 = all the way">Strength <input type="number" data-vox="blur.strength" step="0.1" min="0" max="1"></label>
+        <label class="check" title="Blur the colour volume too"><input type="checkbox" data-vox="blur.color"> colour</label>
+      </div>
+    </div>
+
+    <div class="only surface-panel" data-fields="ASSEMBLY" id="asm-panel">
+      <div class="muted small">Groups of solids, each a .3dm (its meshes, voxelized by dvolume and cached beside it) or a .npz / .npy volume, and a number of clones. Every clone's 3D affine transformation -- translation, rotation, scale -- is optimized. A shape is centred in its own bounding cube first: its transformations act on that, not on where it sits in its file.</div>
+      <h2>Groups</h2>
+      <div id="asm-groups" class="levelset-list" title="Each group: its file, how many clones, their colour, their starting scale (of the scene's half side)"></div>
+      <div class="row">
+        <button type="button" id="asm-group-add" title="Add a group, a copy of the last one">+ Add group</button>
+        <button type="button" id="asm-upload" title="Upload a .3dm / .npz / .npy as a new group">Upload solid</button>
+        <input type="file" id="asm-file" accept=".3dm,.npz,.npy" hidden>
+      </div>
+      <h2>Clones</h2>
+      <div class="row">
+        <label title="max: each voxel is its densest clone's. add: the clones' densities summed (overlaps fuse), clamped to 1">Composite <select data-asm="composite" id="asm-composite"></select></label>
+        <label title="Each shape's own voxels along its side (dvolume's voxelization of its unit box; cached per resolution)">Shape voxels <input type="number" data-asm="shape_resolution" min="8" max="256" step="16"></label>
+        <label title="The width of a shape's surface, in its own voxels: its density is a sigmoid of the signed distance this wide">Edge <input type="number" data-asm="edge" step="0.5" min="0.1"></label>
+      </div>
+      <div class="row">
+        <label title="The clones start uniformly within +- this (of the scene's half side)">Spread <input type="number" data-asm="spread" step="0.05" min="0" max="1"></label>
+        <label class="check" title="Start every clone at a random rotation; off: all as in their files"><input type="checkbox" data-asm="random_rotation"> random rotation</label>
+        <label class="check" title="One scale per clone; off: one per axis (stretching)"><input type="checkbox" data-asm="uniform_scale"> uniform scale</label>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" data-asm="optimize_position"> move</label>
+        <label class="check"><input type="checkbox" data-asm="optimize_rotation"> rotate</label>
+        <label class="check"><input type="checkbox" data-asm="optimize_scale"> scale</label>
+        <label title="The transformations' learning rate, as a multiple of the learning rate (positions in scene half sides, rotations in radians, scales in log)">LR &times; <input type="number" data-asm="transform_lr" step="0.5" min="0"></label>
+      </div>
+    </div>
+
+    <div class="only surface-panel" data-fields="SOLIDS_ON_OFF" id="onoff-panel">
+      <div class="muted small">Every mesh of one .3dm, voxelized by dvolume in one cube that keeps their relative positions (cached beside the file). Each gets a density multiplier, optimized, and pushed towards on or off and towards a share of the volume on.</div>
+      <label>Solids <select id="onoff-select"></select></label>
+      <input type="text" data-onoff="path" id="onoff-path" placeholder=".3dm path (its meshes)">
+      <button type="button" id="onoff-upload">Upload .3dm</button>
+      <input type="file" id="onoff-file" accept=".3dm" hidden>
+      <div class="row">
+        <label title="max: each voxel is its densest part's. add: the parts' densities summed, clamped to 1">Composite <select data-onoff="composite" id="onoff-composite"></select></label>
+        <label title="The width of a part's surface, in voxels: its density is a sigmoid of the signed distance this wide">Edge <input type="number" data-onoff="edge" step="0.5" min="0.1"></label>
+      </div>
+      <div class="row">
+        <label title="Every multiplier's start, 0..1">Start <input type="number" data-onoff="init" step="0.05" min="0.01" max="0.99"></label>
+        <label title="Random spread of the starts, std in logit space (the seed's)">Noise <input type="number" data-onoff="init_noise" step="0.1" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="x mean 4 m (1 - m) over the multipliers: 0 when all are on or off, 1 when all are at 0.5. Ramped in from 0 over the run">Harden weight <input type="number" data-onoff="harden_weight" step="0.5" min="0"></label>
+        <label title="The share of the parts' volume to have on, %. Empty = free">Coverage % <input type="number" data-onoff="coverage" step="5" min="0" max="100" placeholder="free"></label>
+        <label title="x (share on - coverage)^2">Coverage weight <input type="number" data-onoff="coverage_weight" step="1" min="0"></label>
+      </div>
+    </div>
+
+    <div class="only surface-panel" data-fields="EXTRUSIONS" id="ext-panel">
+      <div class="muted small">Closed-curve patterns, as the shapes field's, on the XY, YZ and ZX planes; every shape is extruded through the cube along its plane's normal and gets an optimized multiplier. The planes' weighted masks add up (then clamp to 0..1): a negative multiplier subtracts.</div>
+      <h2>Planes</h2>
+      <div id="ext-planes" class="levelset-list" title="Each plane's pattern: XY across x, y (seen from above); YZ across y, z (as Rhino's Right view); ZX across x, z (as its Front view). YZ, ZX: '(as XY)' repeats the XY pattern"></div>
+      <div class="row">
+        <button type="button" id="ext-upload" title="Upload a .3dm of closed curves as the XY pattern">Upload pattern</button>
+        <input type="file" id="ext-file" accept=".3dm" hidden>
+      </div>
+      <div class="row">
+        <label title="Voxels kept clear around each pattern">Border <input type="number" data-ext="border" min="0" max="64"></label>
+        <label title="Every multiplier's start">Start <input type="number" data-ext="init" step="0.05" min="-0.99" max="0.99"></label>
+        <label title="Random spread of the starts, std (the seed's)">Noise <input type="number" data-ext="init_noise" step="0.05" min="0"></label>
+      </div>
+      <label class="check" title="Multipliers in -1..1 (tanh): a shape can flip negative and cut the others. Off: 0..1"><input type="checkbox" data-ext="negative"> negative multipliers (subtract)</label>
+    </div>
+
+    <div class="only surface-panel" data-fields="VOXELS ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS" id="vol-render-panel">
+      <h2>Volume rendering</h2>
+      <label title="The scene's voxels along each side of the cube. Memory and time grow with its cube">Resolution <input type="number" data-vr="resolution" min="8" max="256" step="16"></label>
+      <div class="row" id="vol-material-row">
+        <label title="The volume's colour where it has no colour volume (VOXELS in density mode, solids on/off, extrusions)">Material <input type="color" data-vr="color"></label>
+        <label class="check" title="Optimize the material colour"><input type="checkbox" data-vr="optimize_color"> optimize</label>
+      </div>
+      <div class="row">
+        <label title="Depth layers each view samples the volume in. More: finer, slower">Samples <input type="number" data-vr="samples" min="4" max="512" step="16"></label>
+        <label title="Opacity of a fully dense layer 1/64 of the view's depth range thick (the same look whatever the samples)">Opacity <input type="number" data-vr="opacity" step="0.05" min="0.001" max="1"></label>
+        <label title="dvolume's density contrast: a sigmoid ((density - 0.5) x this) on the density once it is sampled in the view's frustum, before the opacity. Higher = sharper surfaces at density 0.5 (~20 and up: crisp, empty space stays clear); 0 = off, the density as it is. Sharper surfaces pass less gradient away from them">Contrast <input type="number" data-vr="contrast" step="5" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="The layers' random depth jitter, in layer spacings (fresh every render): less banding">Depth jitter <input type="number" data-vr="depth_noise" step="0.1" min="0"></label>
+        <label title="Views are rendered at this x the canvas, then upsampled: less memory and time, softer images">Render scale <input type="number" data-vr="render_scale" step="0.1" min="0.1" max="1"></label>
+      </div>
+      <div class="row">
+        <label title="lit: dvolume's half-Lambert light on the density's gradient. flat: the colours as they are">Shading <select data-vr="shading.mode" id="vol-shading"></select></label>
+        <label title="camera: the light keeps its place relative to each camera (0, 0 = from the camera; positive azimuth = from the right). world: fixed around the volume (azimuth 0 = from the front)">Light <select data-vr="shading.space" id="vol-light-space"></select></label>
+      </div>
+      <div class="row vol-lit">
+        <label>Azimuth&deg; <input type="number" data-vr="shading.azimuth" step="5"></label>
+        <label title="Positive = from above">Elevation&deg; <input type="number" data-vr="shading.elevation" step="5"></label>
+      </div>
+
+      <h2>Cameras</h2>
+      <div class="row">
+        <label title="Cameras, evenly around the cube">Views <input type="number" data-vr="views.count" min="1" max="32"></label>
+        <label title="Views the models see each step, picked at random. The random transforms are split between them">Per step <input type="number" data-vr="views.per_step" min="1" max="32"></label>
+        <label title="The view shown as the canvas, 0 = the first. The image match terms compare it (VOXELS: the start image colours the volume from it)">Canvas view <input type="number" data-vr="views.canvas_view" min="0" max="31"></label>
+      </div>
+      <div class="row">
+        <label title="The first camera's; the others follow evenly around. 0 = Rhino's Front view (from -y), 90 = its Right view">Azimuth&deg; <input type="number" data-vr="views.azimuth" step="15"></label>
+        <label>Elevation&deg; <input type="number" data-vr="views.elevation" step="5"></label>
+        <label title="Every other camera is this much higher, the rest this much lower">&plusmn; <input type="number" data-vr="views.elevation_variation" step="5" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="Field of view across the canvas' short side. 0 = orthographic">FOV&deg; <input type="number" data-vr="views.fov" step="5" min="0"></label>
+        <label title="How much of the canvas' short side the unit sphere (inside the cube) fills">Fill <input type="number" data-vr="views.fill" step="0.05" min="0.05"></label>
+        <label title="The models' cameras move by up to this much, in azimuth and elevation, per view and step. The canvas keeps still">Jitter&deg; <input type="number" data-vr="jitter" step="5" min="0"></label>
+      </div>
+
+      <h2>Export</h2>
+      <div class="muted small">Saved with the run and with snapshots: density.npz (and color.npz: dvolume fields) and a .3dm with the density's isosurface (VTK's marching cubes) -- with the clones' meshes transformed (assembly) or the parts on / off in their file's units (solids on/off).</div>
+      <label title="The density the exported isosurface is drawn at">Iso level <input type="number" data-vr="iso_level" step="0.05" min="0.01" max="0.99"></label>
+      <h2>Current values</h2>
+      <pre id="vol-current" class="small"></pre>
+    </div>
+
+    <div class="only" data-fields="DISTORTION">
+      <div class="row">
+        <label>Field W <input type="number" data-key="distortion_res" data-idx="0" min="2"></label>
+        <label>Field H <input type="number" data-key="distortion_res" data-idx="1" min="2"></label>
+      </div>
+      <div class="row">
+        <label title="Pyramid levels of the displacement: 1 = one field; each more adds a field at half the resolution (larger, smoother warps)">Levels
+          <input type="number" data-key="distortion_levels" min="1" max="8"></label>
+        <label title="LR x this per level towards the finest. 1 = same everywhere; < 1 favours large, smooth distortion over fine wiggles">LR decay
+          <input type="number" data-key="distortion_lr_decay" step="0.1" min="0.05" max="1"></label>
+      </div>
+      <label title="Per-level displacement cap. absolute: Max is a % of the canvas' long side, the same at every level. resolution dependent: Max is a multiple of that level's grid step (1 = one cell), so coarse levels can move further">Max offset
+        <select data-key="distortion_offset_mode" id="distortion-offset-mode"></select></label>
+      <label class="inline" id="distortion-max-label">Max <input type="number" data-key="distortion_max" step="0.5" min="0"></label>
+      <label title="What gets pulled in from outside the image">Edges <select data-key="distortion_edge_mode" id="distortion-edge-mode"></select></label>
+      <div class="row">
+        <label class="check" title="Penalize the warp folding over itself (pixels torn or duplicated): keeps the Jacobian determinant above a margin">
+          <input type="checkbox" data-key="distortion_prevent_folds" id="prevent-folds"> Prevent folds</label>
+        <label class="inline">weight <input type="number" data-key="distortion_fold_weight" id="fold-weight" step="1" min="0"></label>
+      </div>
+    </div>
+
+    <div class="only" data-fields="SHAPES RELIEF">
+      <label>Pattern <select id="pattern-select"></select></label>
+      <input type="text" data-key="shape_src" id="shape-src" placeholder=".3dm path">
+      <button type="button" id="pattern-upload">Upload .3dm</button>
+      <input type="file" id="pattern-file" accept=".3dm" hidden>
+      <label>Border px <input type="number" data-key="shape_border" min="0"></label>
+      <div class="only" data-fields="SHAPES">
+        <label title="What each shape optimizes. color: its own RGB colour. monochrome: a mix of color 1 and color 2. masking: its opacity, one colour blended over the background">Mode
+          <select data-key="shape_mode" id="shape-mode">
+            <option value="color">color</option><option value="monochrome">monochrome</option><option value="masking">masking</option></select></label>
+        <div class="row shape-mode" data-modes="monochrome masking">
+          <label id="shape-color-1-label" title="Monochrome: the colour at amount 0. Masking: the colour of every shape, at its opacity">Color 1 <input type="color" data-key="shape_color_1"></label>
+          <label class="check" title="Optimize this colour too, starting from the chosen colour">
+            <input type="checkbox" data-key="shape_color_1_optimize"> optimize</label>
+        </div>
+        <div class="row shape-mode" data-modes="monochrome">
+          <label title="The colour at amount 1">Color 2 <input type="color" data-key="shape_color_2"></label>
+          <label class="check" title="Optimize this colour too, starting from the chosen colour">
+            <input type="checkbox" data-key="shape_color_2_optimize"> optimize</label>
+        </div>
+        <div class="shape-mode" data-modes="masking">
+          <div class="row">
+            <label title="The share of the canvas to cover: per-pixel opacity of the composited shapes, summed, / the canvas' pixels. 20 = 20%. Empty = free. A pattern that leaves part of the canvas bare can't reach 100">Opacity budget %
+              <input type="number" data-key="shape_opacity_budget" step="5" min="0" max="100" placeholder="off"></label>
+            <label title="x (mean opacity - budget)^2, both as fractions">Budget weight
+              <input type="number" data-key="shape_opacity_weight" step="1" min="0"></label>
+          </div>
+          <div class="row">
+            <label title="Forces shapes to almost fully opaque or fully transparent (0 = off). Counted from the start of the run: 20 = no hardening for 10 steps, rising over the next 10 to full weight at step 20, then held there. Each shape goes to its nearest; with a budget, the most opaque shapes that add up to it go opaque, the rest transparent. Their learning rate rises during the rise as needed to get there in time. The run also ignores Stop at sim, or it could end before they harden">Hardening steps
+              <input type="number" data-key="shape_harden_steps" step="50" min="0"></label>
+            <label title="x how far the opacities are from 0 or 1, ramped in over the second half of the hardening steps. Against the other losses: higher means a shape's own pull matters less in picking opaque or transparent">Hardening weight
+              <input type="number" data-key="shape_harden_weight" step="1" min="0"></label>
+          </div>
+        </div>
+      </div>
+      <img id="pattern-thumb" class="thumb" alt="" hidden>
+    </div>
+
+    <div class="only" data-fields="RELIEF">
+      <div class="muted small">One height per shape, lit from several directions. Every light's image is augmented and scored, so a step costs (lights) &times; (views) model passes; light 1 is the canvas.</div>
+      <div class="row">
+        <label title="Material colour of the shapes">Shapes <input type="color" data-key="relief_color"></label>
+        <label class="check" title="Optimize the shapes' colour too, starting from the chosen colour">
+          <input type="checkbox" data-key="relief_color_optimize"> optimize</label>
+      </div>
+      <div class="row">
+        <label title="Height of a shape at value 1, in px (the background is at 0)">Depth px <input type="number" data-key="relief_depth" step="1" min="0"></label>
+        <label title="Gaussian sigma (px) on the height map before the normals: the bevel width of the walls (0 = the 1-px antialiased edges)">Bevel px <input type="number" data-key="relief_smooth" step="0.5" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="Fixed lights at evenly spaced azimuths; light 1 is the displayed canvas">Lights <input type="number" data-key="light_count" min="1" max="16"></label>
+        <label title="Extra lights at random azimuths, redrawn every step">Random <input type="number" data-key="light_random_count" min="0" max="16"></label>
+      </div>
+      <div class="row">
+        <label title="Azimuth of light 1, degrees counter-clockwise from the right (135 = top left)">Azimuth &deg; <input type="number" data-key="light_azimuth" step="15"></label>
+        <label title="Elevation of the fixed lights above the canvas plane">Elevation &deg; <input type="number" data-key="light_elevation" step="5" min="0" max="90"></label>
+      </div>
+      <div class="row">
+        <label title="Random lights: lowest elevation">Rnd elev min <input type="number" data-key="light_random_elevation" data-idx="0" step="5" min="0" max="90"></label>
+        <label title="Random lights: highest elevation">Rnd elev max <input type="number" data-key="light_random_elevation" data-idx="1" step="5" min="0" max="90"></label>
+      </div>
+      <label class="inline" title="shade = ambient + (1 - ambient) * max(0, n . l)">Ambient <input type="number" data-key="light_ambient" step="0.05" min="0" max="1"></label>
+    </div>
+
+    <div class="only" data-fields="PIXEL_PATCHES">
+      <label title="optimizable pixels: the patches' pixels are optimized with their placements. image sources: the patches are your images, fixed; only their placements are optimized">Patch source
+        <select data-key="patch_source" id="patch-source">
+          <option value="pixels">optimizable pixels</option><option value="images">image sources</option></select></label>
+      <div class="patch-pixels row">
+        <label>Patches <input type="number" data-key="patch_count" min="1"></label>
+        <label title="Each patch is m x m pixels (RGB or gray, plus alpha)">Resolution m <input type="number" data-key="patch_resolution" min="2"></label>
+      </div>
+      <div class="patch-images">
+        <div id="patch-image-list" class="patch-image-list"></div>
+        <button type="button" id="patch-image-add" title="Add an image from disk">+ Add image</button>
+        <label title="Each image is fitted into this square (its padding transparent; a PNG's alpha is kept)">Image resolution
+          <input type="number" data-key="patch_image_resolution" min="8" max="1024" step="16"></label>
+      </div>
+      <label class="check patch-pixels" title="One m x m image shared by every patch: only the placements differ">
+        <input type="checkbox" data-key="patch_identical"> Identical</label>
+      <label class="check patch-pixels" title="Gray + alpha instead of RGB + alpha">
+        <input type="checkbox" data-key="patch_monochrome"> Monochrome</label>
+      <label class="check" title="Alpha frozen at 1: every patch fully opaque, only its colours (and placement) optimized. Image sources: the images' own alpha is ignored (their padding stays clear)">
+        <input type="checkbox" data-key="patch_opaque"> Opaque</label>
+      <div class="row">
+        <label title="Smallest patch side, fraction of the canvas' short side">Scale min <input type="number" data-key="patch_scale_range" data-idx="0" step="0.05" min="0.01"></label>
+        <label title="Largest patch side, fraction of the canvas' short side">Scale max <input type="number" data-key="patch_scale_range" data-idx="1" step="0.05" min="0.01"></label>
+      </div>
+      <label class="check" title="Off: patches stay axis-aligned">
+        <input type="checkbox" data-key="patch_rotation"> Rotation</label>
+      <label class="check patch-pixels" title="Transforms are not optimized but redrawn at random every frame: only the pixels are optimized, so they must work wherever the patches land">
+        <input type="checkbox" data-key="patch_randomize_transforms" id="patch-randomize"> Randomize transforms each frame</label>
+      <label title="LR x this for patch position / scale / rotation">Transform LR x <input type="number" data-key="patch_transform_lr" id="patch-transform-lr" step="0.5" min="0"></label>
+    </div>
+
+    <div class="only" data-fields="GAUSSIANS">
+      <div class="row">
+        <label>Splats <input type="number" data-key="gaussian_count" min="1"></label>
+        <label title="Extra splats in the background colour, composited last to cut voids (0 = none). Their shapes are optimized, their colour follows the background">Negative <input type="number" data-key="gaussian_negative_count" min="0"></label>
+        <label title="Largest std of a splat along either axis, fraction of the canvas' short side">Max size <input type="number" data-key="gaussian_max_size" step="0.01" min="0.001"></label>
+      </div>
+      <label title="Initial scatter of the splat centres: 0 = all at the canvas centre, 1 = spread over the whole canvas">Distribution spread
+        <input type="number" data-key="gaussian_spread" step="0.1" min="0" max="1"></label>
+      <label class="check" title="Gray splats. With a contrast > 0: one clean shape in the fg colour instead of separate splats"><input type="checkbox" data-key="gaussian_monochrome"> Monochrome</label>
+      <div class="row">
+        <label title="0 = off: soft splats. > 0: sharper splat edges (~20 = crisp), each splat in its own colour; monochrome: their summed density goes through a sigmoid of this sharpness -> one clean shape in the fg colour over the background">Contrast
+          <input type="number" data-key="gaussian_contrast" step="5" min="0"></label>
+        <label title="Shape colour (monochrome with a contrast > 0 only)">Fg <input type="color" data-key="gaussian_fg_color"></label>
+        <label class="check" title="Optimize the fg colour too, starting from the chosen colour (monochrome with a contrast > 0 only)">
+          <input type="checkbox" data-key="gaussian_fg_optimize"> optimize</label>
+      </div>
+      <div class="row">
+        <label class="check" title="Each splat optimizes a roundness: 1 = the plain Gaussian, 0 = a flat block with sharp corners">
+          <input type="checkbox" data-key="gaussian_rectilinear"> Rectilinear</label>
+        <label title="Starting roundness of every splat, 0.01..0.99 (rectilinear only)">Roundness
+          <input type="number" data-key="gaussian_roundness_init" step="0.1" min="0.01" max="0.99"></label>
+      </div>
+      <label class="check" title="Splat angles fixed at 0: edges parallel to the canvas'">
+        <input type="checkbox" data-key="gaussian_axis_aligned"> Axis aligned</label>
+    </div>
+
+    <div class="only" data-fields="CONVOLUTIONS">
+      <div class="muted small">A CNN built on the fly; its weights are what is optimized.</div>
+      <label class="check" title="Off: an optimizable input tensor grown to the image by stride-2 transposed convolutions. On: same-size convolutions over the fixed start image (Initialize canvas picks it), adding a residual to it; only the weights are optimized">
+        <input type="checkbox" data-key="conv_inplace" id="conv-inplace"> Inplace (over the fixed start image)</label>
+      <div class="row conv-generative">
+        <label title="The optimizable input tensor; each layer doubles it (output = input x 2^layers, then resized to the canvas)">Input W
+          <input type="number" data-key="conv_input_res" data-idx="0" min="1" max="256"></label>
+        <label>Input H <input type="number" data-key="conv_input_res" data-idx="1" min="1" max="256"></label>
+      </div>
+      <div class="row">
+        <label>Layers <input type="number" data-key="conv_layers" min="1" max="10"></label>
+        <label title="Generative: channels of the input and first layer, halved each layer (at least 8). Inplace: every hidden layer's width">Channels
+          <input type="number" data-key="conv_channels" min="1"></label>
+        <label title="Kernel size (generative: at least 2)">Kernel <input type="number" data-key="conv_kernel" min="1" max="15"></label>
+      </div>
+      <label class="conv-generative" title="Initialize canvas = start image: Adam steps fitting the net to it before the run (0 = start from the random net)">Fit-to-start steps
+        <input type="number" data-key="conv_fit_steps" min="0" step="50"></label>
+      <div class="row">
+        <label title="After every hidden conv. Keeps the activations' scale fixed as the weights move. Generative from noise: without it a deep random net outputs nearly flat grey">Norm
+          <select data-key="conv_norm" id="conv-norm"></select></label>
+        <label title="Between the layers">Activation <select data-key="conv_activation" id="conv-activation"></select></label>
+      </div>
+      <div class="row">
+        <label title="The weights' learning rate = LR x this. Adam moves every weight by about LR per step, so a whole net drifts much faster than a pixel field at the same LR: lower this first if the image runs away">Weight LR x
+          <input type="number" data-key="conv_weight_lr" step="0.1" min="0"></label>
+        <label class="conv-inplace" title="The net's change to the image's logits is soft-clipped (tanh) to +- this: 0 = unbounded; ~2 keeps the image recognisable whatever the weights do">Residual max
+          <input type="number" data-key="conv_residual_max" step="0.5" min="0" placeholder="off"></label>
+      </div>
+      <div id="conv-note" class="muted small"></div>
+    </div>
+
+    <div class="only" data-fields="REARRANGE">
+      <div class="muted small">The start image's tiles, rearranged. Each destination tile is a soft blend of all the tiles (weights from optimized logits), sharpened to a single tile as the temperature anneals; the last part of the run shows the exact rearrangement.</div>
+      <div class="row">
+        <label>Columns <input type="number" data-key="rearrange_grid" data-idx="0" min="1" max="64"></label>
+        <label>Rows <input type="number" data-key="rearrange_grid" data-idx="1" min="1" max="64"></label>
+      </div>
+      <label class="check" title="On: every tile is used exactly once (a permutation; Sinkhorn-normalized weights, Hungarian at the end). Off: each place picks any tile, so tiles may repeat or drop out"><input type="checkbox" data-key="rearrange_permutation"> permutation</label>
+      <div class="row">
+        <label title="random: every tile starts as a near-uniform blend of all of them. identity: starts as the start image, each tile in its own place">Init
+          <select data-key="rearrange_init"><option value="random">random</option><option value="identity">identity</option></select></label>
+        <label title="random: std of the starting logits">Init std <input type="number" data-key="rearrange_init_std" step="0.05" min="0"></label>
+      </div>
+      <div class="row">
+        <label title="Softmax temperature at the start of the run (high = soft blends)">Temp start <input type="number" data-key="rearrange_temp_start" step="0.1" min="0.001"></label>
+        <label title="... and at the end, annealed geometrically (low = one tile per place)">Temp end <input type="number" data-key="rearrange_temp_end" step="0.01" min="0.001"></label>
+      </div>
+      <div class="row">
+        <label title="Extra push to one-hot: x the weights' mean entropy (0..1), ramped in over the run">Entropy weight <input type="number" data-key="rearrange_entropy_weight" step="0.1" min="0"></label>
+        <label title="From this fraction of the run on, the canvas shows the hard assignment (gradients from the soft one): the result is an exact rearrangement. 1 = soft to the end">Hard after <input type="number" data-key="rearrange_hard_after" step="0.05" min="0" max="1"></label>
+      </div>
+      <label title="The logits' learning rate = LR x this">Logit LR x <input type="number" data-key="rearrange_lr" step="1" min="0"></label>
+    </div>
+
+    <div class="only" data-fields="VAE">
+      <div class="muted small">The field is the VAE's latent (unit-variance units); every step decodes it to the canvas. Models download from Hugging Face on first use.</div>
+      <label title="The autoencoder: f8 / f32 = latent is 1/8 or 1/32 of the image per side. Tiny = TAESD-style approximations, much faster">VAE
+        <select data-key="vae_model" id="vae-model"></select></label>
+      <div class="row">
+        <label title="bf16: about half the memory and time">Precision <select data-key="vae_precision" id="vae-precision"></select></label>
+        <label title="Decoded at the canvas size x this (rounded to the VAE's factor), then resized to the canvas: &lt; 1 is faster, with a smaller latent">Decode scale
+          <input type="number" data-key="vae_decode_scale" step="0.25" min="0.1" max="4"></label>
+      </div>
+      <div class="row">
+        <label title="|z| beyond this is penalized: far outside the prior the decoder draws saturated garbage">Latent bound
+          <input type="number" data-key="vae_latent_bound" step="0.5" min="0.1"></label>
+        <label title="x mean(relu(|z| - bound)^2); 0 = off">Bound weight
+          <input type="number" data-key="vae_latent_weight" step="0.5" min="0"></label>
+      </div>
+    </div>
+
+    <div class="only" data-fields="PIXEL_PATCHES GAUSSIANS SHAPES FUNCTION_STACK RELIEF REVOLUTION MESH_TEXTURE GAUSSIANS_3D VOXELS ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS">
+      <label title="Shapes: the canvas' base layer, under the shapes. Relief: the material around the shapes, lit like them. Surface of revolution, mesh texture: behind the object, unlit">Background <input type="color" data-key="background_color"></label>
+      <label class="check" title="Optimize the background, starting from the chosen colour">
+        <input type="checkbox" data-key="background_optimize"> Optimize background</label>
+      <div class="bg-image-slot" data-bg-slot="PIXEL_PATCHES GAUSSIANS SHAPES FUNCTION_STACK RELIEF REVOLUTION MESH_TEXTURE GAUSSIANS_3D VOXELS ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS">
+        <div id="bg-image" class="bg-image">
+          <div class="bg-image-thumb">
+            <button type="button" id="bg-image-pick" class="match-pick"></button>
+            <button type="button" id="bg-image-clear" class="patch-image-remove" title="remove the background image">&times;</button>
+            <input type="hidden" data-key="background_image" id="bg-image-path">
+          </div>
+          <div id="bg-image-options" class="bg-image-options">
+            <label title="How the image is framed on the canvas. letterbox: all of it, the bars show the background colour. center crop: fills the canvas, the overhang is cut. stretch: fills the canvas, ignoring the image's aspect">Fit
+              <select data-key="background_image_fit" id="bg-image-fit">
+                <option value="letterbox">letterbox</option><option value="crop">center crop</option><option value="stretch">stretch</option></select></label>
+            <label class="check" title="The image x the background colour. Off: the colour only shows in letterbox bars and transparent parts of the image">
+              <input type="checkbox" data-key="background_image_multiply" id="bg-image-multiply"> Multiply with colour</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="only surface-panel" data-fields="SURFACE" id="surface-panel">
+      <div class="surface-preview" title="The cameras' un-jittered views, as the run starts (the canvas is this contact sheet). Updates as you edit">
+        <img id="surface-preview" alt="">
+        <div id="surface-preview-note" class="muted small"></div>
+      </div>
+      <div class="muted small">Canvas W / H = each camera's view as the models see it (224&ndash;256 is plenty and fast).</div>
+
+      <h2>Base</h2>
+      <label>Shape <select data-surf="base.type" id="surface-base"></select></label>
+      <div id="surface-base-params" class="param-block"></div>
+      <div class="row">
+        <label>U spans <input type="number" data-surf="spans" data-idx="0" min="1" max="512"></label>
+        <label>V spans <input type="number" data-surf="spans" data-idx="1" min="1" max="512"></label>
+      </div>
+      <label>Shading <select data-surf="shading" id="surface-shading"></select></label>
+
+      <h2>Deformation</h2>
+      <label>Type <select data-surf="deformation.type" id="surface-deformation"></select></label>
+      <div class="row">
+        <label><span id="deformation-count-label">Count</span> <input type="number" id="deformation-count" min="0" max="256"></label>
+        <button type="button" id="deformation-randomize" title="New random values for every item, within the ranges below">Randomize all</button>
+      </div>
+      <div id="deformation-list" class="param-list"></div>
+
+      <h2>Cameras</h2>
+      <div class="row">
+        <label>Count <input type="number" id="camera-count" min="1" max="32"></label>
+        <button type="button" id="cameras-spread" title="Azimuths evenly around the circle, starting at the first camera's">Spread evenly</button>
+      </div>
+      <div id="camera-list" class="param-list" title="jit°: per step, azimuth and elevation move by up to this many degrees, distance and fov by up to this many %"></div>
+
+      <h2>Lighting</h2>
+      <label title="shared: one light for every view, moved by up to jitter degrees each step. camera: a light per camera, at azimuth / elevation relative to it (0, 0 = from the camera), jittered per view. random: a random direction per view each step, from the camera's side">Mode
+        <select data-surf="light.mode" id="surface-light-mode"></select></label>
+      <div class="row">
+        <label>Azimuth&deg; <input type="number" data-surf="light.azimuth" step="5"></label>
+        <label>Elevation&deg; <input type="number" data-surf="light.elevation" step="5"></label>
+        <label>Jitter&deg; <input type="number" data-surf="light.jitter" step="1" min="0"></label>
+      </div>
+      <div class="row">
+        <label>Ambient <input type="number" data-surf="light.ambient" step="0.05" min="0" max="1"></label>
+        <label>Specular <input type="number" data-surf="light.specular" step="0.05" min="0"></label>
+      </div>
+      <div class="row">
+        <label>Surface <input type="color" data-surf="material.color"></label>
+        <label>Background <input type="color" data-surf="material.background"></label>
+        <label class="check" title="Optimize the background, starting from the chosen colour"><input type="checkbox" data-surf="material.optimize_background"> optimize</label>
+      </div>
+      <div class="bg-image-slot" data-bg-slot="SURFACE"></div>
+
+      <h2>Rendering</h2>
+      <label>Renderer <select data-surf="render.type" id="surface-renderer"></select></label>
+      <div class="row">
+        <label title="Target distance between splats in pixels: smaller = sharper silhouettes, slower">Splat spacing px
+          <input type="number" data-surf="render.spacing" step="0.25" min="0.25" max="8"></label>
+        <label title="Jittered renders of every camera per step">Views / camera
+          <input type="number" data-surf="render.views_per_camera" min="1" max="16"></label>
+      </div>
+
+      <div id="surface-current-block" hidden>
+        <h2>Current values <span class="muted small">(of the run)</span></h2>
+        <pre id="surface-current" class="small"></pre>
+        <button type="button" id="surface-adopt" title="Copy the run's current parameters into the start parameters above">Use as start</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="model">
+    <label title="CLIP: text prompts (or images) as targets. ImageNet: a torchvision classifier, ImageNet-1k classes (or images) as targets. DINOv2: self-supervised image features, image targets only. VLM: a vision-language model asked questions about the image, its answers as targets. Aesthetic Scoring: a ready-made aesthetic / preference score (LAION aesthetic, PickScore, HPSv2). Custom: a classifier, autoencoder or RankNet trained in custom_models">Model family
+      <select id="model-family"></select></label>
+    <label class="family" data-family="clip">CLIP model <select id="model"></select></label>
+    <label class="family" data-family="dino">DINOv2 model <select id="dino-model"></select></label>
+    <label class="family" data-family="imagenet">ImageNet model <select id="imagenet-model"></select></label>
+    <label class="family" data-family="vlm" title="Vision-language models (Hugging Face; downloaded on first use). Every view and question is a pass through the whole model: slower and heavier than CLIP -- fewer views, bf16">VLM <select id="vlm-model"></select></label>
+    <label class="family" data-family="aesthetic" title="Ready-made aesthetic / preference scores (PickScore and HPSv2 score against a prompt)">Aesthetic score
+      <select id="aesthetic-model"></select></label>
+    <label class="family" data-family="custom" title="Models trained in custom_models, in the models folder (env_config.json)">Custom model
+      <select id="custom-model"></select></label>
+    <button type="button" id="add-model">Add</button>
+    <h2 title="All of them at once: their losses add up. The first one also measures the edit size (sim &rarr; start, Stop at sim)">Models
+      </h2>
+    <div id="model-list" class="model-list"></div>
+
+    <div id="model-sheet" class="model-sheet" hidden>
+      <h2 id="sheet-title"></h2>
+      <div id="sheet-info" class="muted small"></div>
+      <label class="sheet-only" data-for="clip dino imagenet vlm" title="Another model of the same family: its targets take the same kind of ends, so they stay">Model
+        <select data-prop="model" id="sheet-model"></select></label>
+      <label class="sheet-only" data-for="dino" title="CLS token: one global, semantic summary of the image. Patch tokens: every patch's features, compared patch-by-patch at the same grid position (mean cosine) -- keeps the layout">Embedding
+        <select data-prop="tokens" id="sheet-tokens"></select></label>
+      <label class="sheet-only" data-for="imagenet classifier vlm" id="sheet-score-label"><span>Maximize</span>
+        <select data-prop="score" id="sheet-score"></select></label>
+      <label class="sheet-only" data-for="prompt" title="PickScore / HPSv2: the score is how well the image fits this text">Prompt
+        <input type="text" data-prop="prompt" placeholder="an image"></label>
+      <div class="sheet-only" data-for="ranknet aesthetic">
+        <label title="maximize / minimize the score, or bring it to a value. Both poles: the - pole swaps maximize and minimize (a value is the same on both)">Score
+          <select data-prop="goal" id="sheet-goal"></select></label>
+        <label class="inline" id="sheet-value-label" title="the score to reach (squared error)">value <input type="number" data-prop="value" step="0.1"></label>
+        <label class="inline" title="weight of the score term against the other models, the regularization and matching terms">weight <input type="number" data-prop="weight" step="0.1"></label>
+      </div>
+      <label class="sheet-only" data-for="clip custom aesthetic vlm" title="bf16: the model's backbone / image tower (a VLM: all of it) at half precision: about half the GPU memory and faster on large models. Scores barely change, but gradients can differ a lot on large models, so compare models at the same precision">Precision
+        <select data-prop="precision" id="sheet-precision"></select></label>
+      <div class="sheet-only" data-for="clip dino imagenet classifier autoencoder vlm">
+        <div id="sheet-hint" class="muted small"></div>
+        <h2 title="A class direction rewards score(target) - score(source)">Targets <span class="muted small">(&Delta; = direction, source &rarr; target)</span></h2>
+        <div id="sheet-targets" class="targets"></div>
+        <div class="row">
+          <button type="button" data-add="target" data-image class="sheet-only" data-for="clip dino imagenet classifier autoencoder">+ img</button>
+          <button type="button" data-add="target" class="sheet-only" data-for="clip imagenet classifier vlm" data-word>+ text</button>
+          <button type="button" data-add="direction" data-image class="sheet-only" data-for="clip dino imagenet classifier autoencoder" title="direction: source image &rarr; target image">&Delta; img</button>
+          <button type="button" data-add="direction" class="sheet-only" data-for="clip imagenet classifier vlm" data-word>&Delta; text</button>
+          <button type="button" data-add="direction" data-yes-no class="sheet-only" data-for="vlm" title="A yes / no question: No &rarr; Yes rewards log p(Yes) - log p(No), how sure the model is that the answer is yes">&Delta; yes/no</button>
+        </div>
+      </div>
+      <div class="sheet-only" data-for="clip">
+        <label class="check" title="On: every text target is embedded through each template and averaged (a concept, not one sentence's quirks). Off: prompts are embedded as written (paraphrases still averaged); the list is kept">
+          <input type="checkbox" data-prop="use_templates" id="sheet-use-templates"> Use templates</label>
+        <label id="sheet-templates-label"><span>One per line, <b>{}</b> = prompt</span>
+          <textarea data-prop="templates" data-lines id="sheet-templates" rows="5"></textarea></label>
+      </div>
+      <datalist id="sheet-classes"></datalist>
+    </div>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="match">
+    <h2>Match image attributes<span class="muted small">(0 = off; click a thumbnail to override)</span></h2>
+    <h3>Pixels</h3>
+    <label class="inline" data-match="rgb" title="MSE of the RGB values (for an embedding match, add the image as a target instead)">rgb <input type="number" data-key="image_sim_weight" step="0.1" min="0"></label>
+    <label class="inline" data-match="gray" title="MSE of luminance">gray <input type="number" data-key="image_gray_weight" step="0.1" min="0"></label>
+    <label class="inline" data-match="color_stats" title="Sliced Wasserstein distance between pixel color distributions (palette, ignores layout)">color stats <input type="number" data-key="image_color_stats_weight" step="0.1" min="0"></label>
+    <h3>Edges</h3>
+    <label class="inline" data-match="edges" title="MSE of edge maps (edges in the same places)">edges <input type="number" data-key="image_edge_weight" step="0.1" min="0"></label>
+    <label class="inline" data-match="edge_stats" title="Sliced Wasserstein distance between gradient distributions: edge density and orientation (mod 180 deg) at several scales, ignores layout">edge stats <input type="number" data-key="image_edge_stats_weight" step="0.1" min="0"></label>
+    <label class="inline">Edge operator <select data-key="edge_operator" id="edge-operator"></select></label>
+    <label class="inline" title="Pyramid levels for edge stats: 1 = full resolution only; each more adds a level at half the size (coarser contours)">Edge stats scales
+      <input type="number" data-key="edge_stats_scales" min="1" max="6"></label>
+    <h3>Depth</h3>
+    <label class="inline" data-match="depth" title="MSE of normalized Depth Anything V2 depth">depth <input type="number" data-key="image_depth_weight" step="0.1" min="0"></label>
+    <label class="inline" title="Transformed copies scored by the depth term, each against the target under the same transform (0 = bare canvas only; guards against adversarial depth matches)">Depth views
+        <input type="number" data-key="depth_augment_views" min="0" max="16"></label>
+    <label class="inline" title="Per-map depth normalization before the MSE. none = raw output (also matches the depth range, which varies per image); mean = (d - mean) / std; mad = (d - median) / mean|d - median| (robust to outliers)">Depth normalization
+      <select data-key="depth_normalization" id="depth-normalization"></select></label>
+    <h3>Lines</h3>
+    <label class="inline" data-match="lines" title="MSE between differentiable Hough accumulators: straight lines at the same angle and position, weighted by how continuously they run">lines <input type="number" data-key="image_lines_weight" step="0.1" min="0"></label>
+    <label class="inline" title="Blur of the line accumulators, in (angle, offset) bins: tolerance to small shifts and tilts (0 = exact)">Lines blur
+      <input type="number" data-key="lines_blur" step="0.5" min="0"></label>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="regularization">
+    <div class="only muted small" data-fields="RELIEF">Relief: TV and symmetry act on the height map, not the lit image.</div>
+    <div class="only muted small" data-fields="REVOLUTION">Surface of revolution: with a texture, TV acts on the texture; blur and median too. Symmetry acts on the canvas.</div>
+    <div class="only muted small" data-fields="MESH_TEXTURE">Mesh texture: TV, blur and median act on the texture. Symmetry acts on the canvas.</div>
+    <div class="only muted small" data-fields="GAUSSIANS_3D">3D gaussian splats: TV and symmetry act on the canvas view; blur and median don't apply.</div>
+    <div class="only muted small" data-fields="VOXELS">Voxels: TV and symmetry act on the canvas view (the volume's own 3D smoothness is on the Field tab); blur and median don't apply.</div>
+    <div class="only muted small" data-fields="ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS">Solids: TV and symmetry act on the canvas view; blur and median don't apply.</div>
+    <label>TV weight <input type="number" data-key="tv_weight" step="0.01" min="0"></label>
+    <div class="row">
+      <label>Blur strength <input type="number" data-key="blur_strength" step="0.01" min="0" max="1"></label>
+      <label>Blur sigma <input type="number" data-key="blur_sigma" step="0.25" min="0.1"></label>
+    </div>
+    <div class="row">
+      <label title="Each step the field moves this far towards its median filtered version (0 = off): removes speckle and thin strokes, keeps edges">Median weight
+        <input type="number" data-key="median_weight" step="0.01" min="0" max="1"></label>
+      <label title="Median window size in field pixels (odd: 3, 5, 7...)">Median kernel
+        <input type="number" data-key="median_kernel" step="2" min="3"></label>
+    </div>
+    <div class="row">
+      <label>Symmetry weight <input type="number" data-key="symmetry_weight" step="0.1" min="0"></label>
+      <label>Mirror <select data-key="symmetry_axis" id="symmetry-axis"></select></label>
+    </div>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="optimization">
+    <label>Learning rate <input type="number" data-key="learning_rate" step="0.001" min="0"></label>
+    <label>Max steps / pole <input type="number" data-key="epochs" min="1"></label>
+    <label>Seed <input type="number" data-key="seed"></label>
+    <label title="Torch device for the next run (and the surface preview). Switching frees the models loaded on the previous one">Device <select data-key="device" id="device"></select></label>
+    <h2>Experiment</h2>
+    <label class="check"><input type="checkbox" data-key="bidirectional"> Bidirectional (+ / &minus; poles)</label>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="budget-on"> Stop at sim</label>
+      <input type="number" id="budget-value" step="0.01" min="0" max="1" value="0.85">
+    </div>
+    <label class="check" title="Off: all targets and directions at once. On: one at a time, in order (every model's, as listed), each continuing from the last state (same canvas and optimizer) -- an animation through the targets. Image matching and regularization stay on throughout; Max steps / pole and Stop at sim are not used">
+      <input type="checkbox" data-key="sequential_targets" id="sequential-targets"> Sequential targets</label>
+    <div class="row">
+      <label>Steps / target <input type="number" data-key="sequential_steps" id="sequential-steps" min="1"></label>
+      <label title="Passes through the target list">Cycles <input type="number" data-key="sequential_cycles" id="sequential-cycles" min="1"></label>
+    </div>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="augmentation">
+    <div class="only muted small" data-fields="SURFACE">SURFACE: the cameras' and lights' jitter (Field tab) are the augmentation; of these only Noise applies.</div>
+    <div class="only muted small" data-fields="REVOLUTION">Surface of revolution: with a texture, these apply to each angle (Field tab), the random transforms split between the angles.</div>
+    <div class="only muted small" data-fields="MESH_TEXTURE">Mesh texture: these apply to each view seen per step (Field tab), the random transforms split between them.</div>
+    <div class="only muted small" data-fields="GAUSSIANS_3D">3D gaussian splats: these apply to each view seen per step (Field tab), the random transforms split between them.</div>
+    <div class="only muted small" data-fields="VOXELS ASSEMBLY SOLIDS_ON_OFF EXTRUSIONS">Volumes: these apply to each view seen per step (Field tab), the random transforms split between them.</div>
+    <div class="row">
+      <label>Copies <input type="number" data-key="transform_count" min="0"></label>
+      <label>Min crop <input type="number" data-key="crop_min_scale" step="0.05" min="0.05" max="1"></label>
+    </div>
+    <div class="row">
+      <label>Rotation &deg; <input type="number" data-key="rotation" min="0"></label>
+      <label title="Corners pulled inward by up to this fraction of the half-size (0 = off), applied to half the copies">Perspective <input type="number" data-key="perspective" step="0.05" min="0" max="1"></label>
+    </div>
+    <div class="row">
+      <label title="How far past the canvas edge (fraction of its size) a copy may reach into grey fill. A copy that does not fit zooms in instead; 0 = never any fill">Margin <input type="number" data-key="view_margin" step="0.01" min="0" max="0.5"></label>
+      <label>Noise <input type="number" data-key="noise" step="0.01" min="0"></label>
+    </div>
+    <div class="row">
+      <label>Jitter <input type="number" data-key="jitter" step="0.05" min="0"></label>
+      <label>Hue <input type="number" data-key="hue" step="0.01" min="0" max="0.5"></label>
+    </div>
+    <label class="check"><input type="checkbox" data-key="flip"> Horizontal flip</label>
+    <label class="check"><input type="checkbox" data-key="include_untransformed"> Include bare canvas</label>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="defaults">
+    <button type="button" id="preset-editing" title="Subtle measured edit of the start image: both poles, stop at sim 0.85, low LR, light augmentation, rgb anchor. Models and their targets unchanged.">Editing defaults</button>
+    <button type="button" id="preset-generation" title="Paint the text targets from noise: high LR, coarse-to-fine pyramid, 32 hard crops, no image matching. Models and their targets unchanged.">Generation defaults</button>
+    <div id="preset-note" class="muted small"></div>
+    <button type="button" id="reset-defaults">Reset to script defaults</button>
+  </section>
+
+  <section class="tab-panel" role="tabpanel" data-tab="status">
+    <div id="status-log" class="status-log" role="log" tabindex="0"></div>
+  </section>
+
+</aside>
+
+<div id="workspace">
+<main>
+  <div class="stage-wrap">
+    <div class="run-controls">
+      <button type="button" id="start" class="run-btn" title="Start a run with these settings"></button>
+      <button type="button" id="pause" class="run-btn" hidden></button>
+      <button type="button" id="stop" class="run-btn" hidden title="Stop the run (what it has so far is saved)"></button>
+    </div>
+    <div class="view-controls">
+      <button type="button" id="all-views" class="run-btn" hidden aria-pressed="false"
+              title="All views: every camera of the 3D field rendered, tiled, instead of the canvas view alone (the canvas view outlined). Costs the run a little while on">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></svg>
+      </button>
+    </div>
+    <div class="stage">
+      <img id="img-canvas" alt="">
+      <img id="img-gradient" class="overlay" alt="" hidden>
+    </div>
+  </div>
+
+  <section class="plot-panel">
+    <canvas id="plot"></canvas>
+    <div class="plot-controls">
+      <label class="check"><input type="checkbox" id="normalize" checked> normalize axes</label>
+      <label class="check"><input type="checkbox" id="show-views" checked> augmented views</label>
+      <label class="check" title="moving average over trace points (display only)">smooth <input type="number" id="smooth" value="8" min="1" max="200"></label>
+      <label class="check" title="Each loss's history over the run (this pole) in the table's last column"><input type="checkbox" id="show-graphs"> show graphs</label>
+    </div>
+    <table id="values"></table>
+  </section>
+</main>
+</div>
+
+<aside id="inspector">
+  <div class="inspector-head">
+    <div class="files">
+      <button type="button" id="snapshot" title="Save the current run's outputs and its config into a new folder of the results folder (env_config.json)">Save snapshot</button>
+      <div class="row">
+        <button type="button" id="config-save" title="Download the settings as a config file">Save config</button>
+        <button type="button" id="config-load" title="Restore the settings from a config file (or a snapshot's config.json)">Load config</button>
+      </div>
+      <label class="check" title="Save the images (and the .3dm pattern) the settings refer to inside the config file (and the snapshot's config.json), base64 encoded. Off: only their paths, which may stop working"><input type="checkbox" id="embed-files" checked> embed images</label>
+      <input type="file" id="config-file" accept=".json,application/json" hidden>
+      <div id="note" class="muted small" hidden></div>
+    </div>
+    <div class="toggles" title="What this panel shows (and the gradient over the current image)">
+      <label class="check"><input type="checkbox" data-show="start" checked> start</label>
+      <label class="check"><input type="checkbox" data-show="poles" checked> poles</label>
+      <label class="check"><input type="checkbox" data-show="views" checked> views</label>
+      <label class="check"><input type="checkbox" data-show="depth" checked> depth</label>
+      <label class="check"><input type="checkbox" data-show="edges" checked> edges</label>
+      <label class="check"><input type="checkbox" data-show="lines" checked> lines</label>
+      <label class="check"><input type="checkbox" data-show="displacement" checked> displacement</label>
+      <label class="check" title="The shared patch image (Pixel patches with Identical on)"><input type="checkbox" data-show="patch" checked> patch</label>
+      <label class="check" title="The VAE field's latent channels (-bound black .. +bound white)"><input type="checkbox" data-show="latent" checked> latent</label>
+      <label class="check" title="The rearrange field's tile weights: row = destination tile, column = source tile (white = 1)"><input type="checkbox" data-show="assignment" checked> assignment</label>
+      <label class="check" title="The relief field's height map, normals and every light's image (fixed, then random)"><input type="checkbox" data-show="relief" checked> relief</label>
+      <label class="check" title="The surface of revolution's texture, its angles this step, and its mask, normals, depth and uv maps"><input type="checkbox" data-show="revolution" checked> revolution</label>
+      <label class="check" title="The mesh texture field's texture, the views the models saw this step, and the canvas view's mask, normals, position and uv maps"><input type="checkbox" data-show="mesh" checked> mesh</label>
+      <label class="check" title="The 3D gaussian splats' views the models saw this step"><input type="checkbox" data-show="g3d" checked> 3D splats</label>
+      <label class="check" title="The volume fields' (voxels, assembly, solids on/off, extrusions) views the models saw this step and the volume's central sections"><input type="checkbox" data-show="vox" checked> volume</label>
+      <label class="inline gain" title="Amplification of the difference maps in the result summary: 0.5 + gain x (a - b), so mid-grey = no change. Applies to the summary made at the end of the next run">result diff gain
+        <input type="number" data-key="diff_gain" step="0.5" min="0"></label>
+      <label class="check" title="Over the current image: |d loss / d canvas| per pixel (bright = where the next step pushes hardest). Kept only while on"><input type="checkbox" data-show="gradient"> gradient</label>
+    </div>
+  </div>
+  <div class="panels">
+    <figure data-show="start" data-frame="start"><img id="img-start" alt=""><figcaption>start</figcaption></figure>
+    <figure data-show="poles" data-frame="minus"><img id="img-minus" alt=""><figcaption>&minus; pole</figcaption></figure>
+    <figure data-show="poles" data-frame="plus"><img id="img-plus" alt=""><figcaption>+ pole</figcaption></figure>
+    <figure data-show="poles" data-frame="composite"><img id="img-composite" alt=""><figcaption>result summary</figcaption></figure>
+    <figure data-show="views" data-frame="views"><img id="img-views" alt=""><figcaption>augmented views</figcaption></figure>
+    <figure data-show="depth" data-frame="depth_start"><img alt=""><figcaption>depth: start</figcaption></figure>
+    <figure data-show="depth" data-frame="depth_current"><img alt=""><figcaption>depth: current</figcaption></figure>
+    <figure data-show="edges" data-frame="edges_start"><img alt=""><figcaption>edges: start</figcaption></figure>
+    <figure data-show="edges" data-frame="edges_current"><img alt=""><figcaption>edges: current</figcaption></figure>
+    <figure data-show="lines" data-frame="lines_start"><img alt=""><figcaption>lines: start</figcaption></figure>
+    <figure data-show="lines" data-frame="lines_current"><img alt=""><figcaption>lines: current</figcaption></figure>
+    <figure data-show="displacement" data-frame="displacement"><img alt=""><figcaption>displacement (hue = direction)</figcaption></figure>
+    <figure data-show="patch" data-frame="patch"><img alt=""><figcaption>patch (untransformed)</figcaption></figure>
+    <figure data-show="latent" data-frame="latent"><img alt=""><figcaption>latent channels</figcaption></figure>
+    <figure data-show="assignment" data-frame="assignment"><img alt=""><figcaption>tile assignment (row = destination)</figcaption></figure>
+    <figure data-show="relief" data-frame="height"><img alt=""><figcaption>relief: height</figcaption></figure>
+    <figure data-show="relief" data-frame="normals"><img alt=""><figcaption>relief: normals</figcaption></figure>
+    <figure data-show="relief" data-frame="lights"><img alt=""><figcaption>relief: every light (fixed, then random)</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_texture"><img alt=""><figcaption>revolution: texture</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_angles"><img alt=""><figcaption>revolution: angles this step</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_mask"><img alt=""><figcaption>revolution: mask</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_normals"><img alt=""><figcaption>revolution: normals</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_depth"><img alt=""><figcaption>revolution: depth</figcaption></figure>
+    <figure data-show="revolution" data-frame="rev_uv"><img alt=""><figcaption>revolution: uv at angle 0 (red = u, green = v)</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_texture"><img alt=""><figcaption>mesh: texture</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_views"><img alt=""><figcaption>mesh: views this step</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_mask"><img alt=""><figcaption>mesh: mask</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_normals"><img alt=""><figcaption>mesh: normals</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_position"><img alt=""><figcaption>mesh: position (in the bounding box)</figcaption></figure>
+    <figure data-show="mesh" data-frame="mesh_uv"><img alt=""><figcaption>mesh: uv (red = u, green = v)</figcaption></figure>
+    <figure data-show="g3d" data-frame="g3d_views"><img alt=""><figcaption>3D splats: views this step</figcaption></figure>
+    <figure data-show="vox" data-frame="vox_views"><img alt=""><figcaption>volume: views this step</figcaption></figure>
+    <figure data-show="vox" data-frame="vox_slices"><img alt=""><figcaption>volume: sections (front, right, top)</figcaption></figure>
+  </div>
+</aside>
+
+<footer id="statusbar">
+  <div id="status" class="status">idle</div>
+  <div id="budget" class="budget" hidden title="edit size so far, towards Stop at sim"><div id="budget-bar"></div></div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Segmentation Explorer</title>
+  <link rel="stylesheet" href="tiles.css">
+  <link rel="stylesheet" href="segment.css">
+</head>
+<body>
+  <header>
+    <h1>Segmentation Explorer</h1>
+    <p>Where in the image does a model see something? Maps of classes, prompts, attention and attribution, drawn over the image as fuzzy masks, and the segmentation they make together.</p>
+  </header>
+
+  <main>
+    <div class="side">
+      <section class="panel">
+        <h2>Image &amp; model</h2>
+        <div class="modes">
+          <label><input type="radio" name="mode" value="image" checked> image</label>
+          <label><input type="radio" name="mode" value="3d"> 3D model</label>
+        </div>
+        <div class="toolbar column">
+          <label class="pick">model <select id="model"></select></label>
+          <label class="pick">method <select id="method"></select></label>
+        </div>
+        <p class="hint" id="method-hint"></p>
+        <div id="image-source">
+          <button id="drop" class="dropzone" title="click to pick an image, or drop one here">
+            <img id="drop-image" alt="" hidden>
+            <span id="drop-text">click or drop an image</span>
+          </button>
+          <input id="file" type="file" accept="image/*" hidden>
+          <p class="hint" id="image-info"></p>
+        </div>
+        <button id="compute" class="primary">Compute</button>
+        <p class="status" id="status">loading…</p>
+        <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+        <div class="toolbar rescan">
+          <button id="rescan" title="look for new model folders">Rescan models</button>
+        </div>
+      </section>
+
+      <section class="panel" id="scene-panel" hidden>
+        <h2>3D model</h2>
+        <button id="drop-3dm" class="dropzone small-drop" title="click to pick a Rhino file, or drop one here">click or drop a Rhino file (.3dm)</button>
+        <input id="file-3dm" type="file" accept=".3dm" hidden>
+        <p class="hint" id="scene-info">Meshes are rendered (Breps only with their render meshes saved).</p>
+        <div class="toolbar column">
+          <label class="slider">views <input id="views" type="range" min="4" max="72" step="1" value="30"><output id="views-out">30</output></label>
+          <label class="pick" title="where the cameras are, all looking at the center of the model">cameras
+            <select id="layout">
+              <option value="orbit">orbit at one height</option>
+              <option value="spiral">spiral, low to high</option>
+              <option value="dome">dome (upper half)</option>
+              <option value="sphere">sphere</option>
+            </select>
+          </label>
+          <label class="slider" id="elevation-row" title="degrees above the horizon">elevation <input id="elevation" type="range" min="-60" max="85" step="5" value="25"><output id="elevation-out">25</output></label>
+          <label class="slider" title="vertical field of view, degrees">field of view <input id="fov" type="range" min="15" max="90" step="5" value="40"><output id="fov-out">40</output></label>
+          <label class="pick">frame size
+            <select id="frame-size">
+              <option value="384">384 px</option>
+              <option value="512" selected>512 px</option>
+              <option value="768">768 px</option>
+            </select>
+          </label>
+          <label class="pick">material
+            <select id="material">
+              <option value="clay">clay</option>
+              <option value="colors">object colors</option>
+              <option value="normals">normals</option>
+            </select>
+          </label>
+          <label class="pick">background <input id="render-bg" type="color" value="#ffffff"></label>
+          <label title="after every change, the method also runs on every frame"><input id="auto-sweep" type="checkbox" checked> compute every frame</label>
+        </div>
+        <div class="toolbar">
+          <button id="render">Render frames</button>
+          <button id="sweep" title="the current method on every frame">Compute all frames</button>
+        </div>
+        <h2>Save to Rhino</h2>
+        <p class="hint">The selected map (or segmentation, or picture) as it is drawn alone.</p>
+        <div class="toolbar column">
+          <label class="slider" title="frustums: where the mask goes, from the camera (0) to the center of the model (1)">mask plane <input id="plane" type="range" min="0.05" max="1" step="0.05" value="0.5"><output id="plane-out">0.5</output></label>
+        </div>
+        <div class="toolbar">
+          <button id="save-frustum" title="the selected frame's camera frustum as lines, the map as a mesh with vertex colors on a plane across it, the camera as a named view">Save frustum</button>
+          <button id="save-frustums" title="every frame's frustum and map (from the last Compute all frames), the map's value in each frame as user text">Save all frustums</button>
+        </div>
+        <div class="toolbar">
+          <label class="pick" title="the model's meshes, every vertex colored by where it lands in the frame(s); vertices no frame sees stay clay">
+            <select id="model-views">
+              <option value="this">model, from this view</option>
+              <option value="all">model, all views averaged</option>
+            </select>
+          </label>
+          <button id="save-model">Save model</button>
+        </div>
+      </section>
+
+      <section class="panel" id="prompts-panel">
+        <h2>Prompts</h2>
+        <div id="text-prompts">
+          <label class="block" for="texts">text, one prompt per line <span class="note">(Ctrl+Enter to compute)</span></label>
+          <textarea id="texts" rows="4" spellcheck="false" placeholder="chair&#10;glass&#10;background"></textarea>
+          <label class="pick" id="template-row" title="every text prompt is put in place of {}">wrapped in <input id="template" type="text" value="a photo of a {}."></label>
+        </div>
+        <div id="image-prompts">
+          <label class="block">reference images</label>
+          <div id="references"></div>
+          <button id="add-reference" class="dropzone small-drop" title="click to pick images, or drop them here">+ click or drop images</button>
+          <input id="reference-file" type="file" accept="image/*" multiple hidden>
+        </div>
+        <div id="point-prompts">
+          <label><input id="pick-points" type="checkbox"> click the image to add points</label>
+          <div id="points"></div>
+        </div>
+        <p class="hint" id="prompts-hint"></p>
+      </section>
+
+      <section class="panel" id="params-panel">
+        <h2>Parameters</h2>
+        <div class="toolbar column">
+          <label class="slider" data-param="resolution" title="the image is scaled to this many pixels along its longer side before it is cut into patches">resolution <input id="resolution" type="range" min="112" max="1344" step="16" value="448"><output id="resolution-out">448</output></label>
+          <label class="pick" data-param="reference" title="what a reference image stands for">reference image as
+            <select id="reference">
+              <option value="global">its summary ([CLS])</option>
+              <option value="patches">its best-matching patch</option>
+            </select>
+          </label>
+          <label data-param="compete" title="softmax over the maps: at every pixel their values add up to 1"><input id="compete" type="checkbox" checked> prompts compete</label>
+          <label class="slider" data-param="window">window (px) <input id="window" type="number" min="16" step="16" value="128"></label>
+          <label class="slider" data-param="window">overlap % <input id="overlap" type="range" min="0" max="90" step="5" value="50"><output id="overlap-out">50</output></label>
+          <label class="slider" data-param="occluder" title="side of the gray square, in % of the model's input">square % <input id="occluder" type="range" min="3" max="50" step="1" value="12"><output id="occluder-out">12</output></label>
+          <label class="slider" data-param="gradients" title="points on the path from the baseline to the image">steps <input id="steps" type="range" min="4" max="128" step="4" value="32"><output id="steps-out">32</output></label>
+          <label class="pick" data-param="gradients" title="the image the path starts from: what counts as 'nothing'">baseline
+            <select id="baseline">
+              <option value="blur">blurred image</option>
+              <option value="black">black</option>
+              <option value="mean">average color</option>
+            </select>
+          </label>
+          <label class="slider" data-param="gradients" title="gaussian blur of the attribution, in pixels of a 224 px input">smooth <input id="smooth" type="range" min="0" max="8" step="0.5" value="2"><output id="smooth-out">2</output></label>
+          <label class="slider" data-param="k">clusters <input id="k" type="range" min="2" max="20" value="6"><output id="k-out">6</output></label>
+          <label class="slider" data-param="temperature" title="softmax temperature: low = every pixel goes almost entirely to one map, high = fuzzy">temperature <input id="temperature" type="range" min="0" max="1" step="0.01" value="0.5"><output id="temperature-out"></output></label>
+        </div>
+        <p class="hint" id="params-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Display</h2>
+        <div class="toolbar column">
+          <label class="pick">show
+            <select id="style">
+              <option value="heat">colors over the image</option>
+              <option value="cutout">the image through the mask</option>
+              <option value="map">the map alone</option>
+            </select>
+          </label>
+          <label class="pick">colors
+            <select id="colormap">
+              <option value="inferno">inferno</option>
+              <option value="viridis">viridis</option>
+              <option value="gray">gray</option>
+              <option value="red">red</option>
+            </select>
+          </label>
+          <label class="pick" title="what black and white (0 and 1) stand for">range
+            <select id="range">
+              <option value="auto">automatic</option>
+              <option value="each">each map: its min … max</option>
+              <option value="all">all maps: min … max</option>
+              <option value="absolute">absolute: 0 … 1</option>
+            </select>
+          </label>
+          <label class="pick" title="maps with values around 0 (drops, attributions, PCA)">signed values
+            <select id="signed">
+              <option value="both">both (blue − / red +)</option>
+              <option value="positive">positive only</option>
+              <option value="negative">negative only</option>
+              <option value="abs">absolute value</option>
+            </select>
+          </label>
+          <label class="slider">opacity <input id="opacity" type="range" min="0" max="1" step="0.05" value="0.65"><output id="opacity-out">0.65</output></label>
+          <label class="slider" title="&gt; 1: only the strongest values stand out">contrast <input id="gamma" type="range" min="0.2" max="4" step="0.1" value="1"><output id="gamma-out">1</output></label>
+          <label class="slider" title="0: fuzzy mask. Above 0: a hard mask, on where the value is above the threshold">threshold <input id="threshold" type="range" min="0" max="1" step="0.01" value="0"><output id="threshold-out">0</output></label>
+          <label title="off: every patch / pixel of the map as a square, as the model computed it"><input id="smooth-display" type="checkbox" checked> smooth</label>
+          <label class="pick">background <input id="map-bg" type="color" value="#ececec"></label>
+        </div>
+        <p class="hint">Scroll to zoom, drag to pan, double-click to reset.</p>
+        <div class="toolbar">
+          <button id="save-png" title="what the view shows, at the image's resolution (at most 4096 px)">Save PNG</button>
+          <button id="save-mask" title="the selected map as a gray mask, at the image's resolution">Save mask</button>        </div>
+      </section>
+    </div>
+
+    <div class="stage segment">
+      <section class="panel frames-panel" id="frames-panel" hidden>
+        <h2>Frames</h2>
+        <p class="hint" id="frames-empty">Load a Rhino file.</p>
+        <div id="frames"></div>
+      </section>
+
+      <section class="panel view-panel">
+        <div class="view-head">
+          <h2 id="view-title">View</h2>
+          <span class="note" id="result-notes"></span>
+        </div>
+        <div class="view-box">
+          <div id="view" class="view">
+            <canvas id="canvas"></canvas>
+            <div id="empty" class="empty">upload an image</div>
+          </div>
+        </div>
+        <p class="note" id="hover-info">&nbsp;</p>
+      </section>
+
+      <section class="panel" id="here">
+        <h2>Here</h2>
+        <p class="hint" id="here-empty">Hover the image: the value of every map at that point.</p>
+        <div id="here-bars"></div>
+      </section>
+
+      <section class="panel sweep-panel" id="sweep-panel" hidden>
+        <div class="view-head">
+          <h2>Per frame</h2>
+          <div class="toolbar">
+            <label class="pick" title="one number per map and frame">
+              <select id="aggregate">
+                <option value="mean">mean over the frame</option>
+                <option value="max">maximum</option>
+                <option value="area">share of the segmentation</option>
+              </select>
+            </label>
+            <span class="note" id="sweep-info"></span>
+          </div>
+        </div>
+        <p class="hint" id="sweep-empty">Compute all frames to see every map's value in every frame.</p>
+        <div class="sweep-body">
+          <div class="graph-box">
+            <svg id="graph"></svg>
+            <p class="note" id="graph-info">&nbsp;</p>
+          </div>
+          <div class="sweep-side">
+            <div id="legend"></div>
+            <h2>Best frames</h2>
+            <div id="best"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel maps-panel">
+        <h2>Maps</h2>
+        <p class="hint" id="maps-empty">Nothing computed yet.</p>
+        <div id="maps"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
+  <script type="module" src="segment3d.js"></script>
+  <script src="segment.js"></script>
+</body>
+</html>

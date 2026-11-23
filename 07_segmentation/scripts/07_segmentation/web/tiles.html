@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tile Map</title>
+  <link rel="stylesheet" href="tiles.css">
+</head>
+<body>
+  <header>
+    <h1>Tile Map</h1>
+    <p>One image cut into square tiles, the tiles placed by the vectors a model gives them and grouped into clusters, then put back together colored by cluster.</p>
+  </header>
+
+  <main>
+    <div class="side">
+      <section class="panel">
+        <h2>Data</h2>
+        <div class="toolbar column">
+          <label class="pick">model <select id="model"></select></label>
+        </div>
+        <button id="drop" class="dropzone" title="click to pick an image, or drop one here">
+          <img id="drop-image" alt="" hidden>
+          <span id="drop-text">click or drop an image</span>
+        </button>
+        <input id="file" type="file" accept="image/*" hidden>
+        <p class="hint" id="image-info"></p>
+        <div class="toolbar column partition">
+          <label class="pick">tile size (px) <input id="tile-size" type="number" min="8" step="8" value="64"></label>
+          <label class="slider">overlap % <input id="overlap" type="range" min="0" max="90" step="5" value="0"><output id="overlap-out">0</output></label>
+        </div>
+        <p class="hint" id="tiling-info"></p>
+        <div class="toolbar">
+          <button id="rescan" title="look for new model folders">Rescan models</button>
+        </div>
+        <p class="status" id="status">loading…</p>
+        <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+      </section>
+
+      <section class="panel">
+        <h2>Projection</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="projection"></select></label>
+          <label class="slider" id="perplexity-row">perplexity <input id="perplexity" type="range" min="5" max="100" value="30"><output id="perplexity-out">30</output></label>
+          <label class="slider" id="neighbors-row">neighbours <input id="neighbors" type="range" min="2" max="100" value="15"><output id="neighbors-out">15</output></label>
+          <label class="pick">vectors
+            <select id="prep" title="default: the best way to compare this model's vectors; anything else overrides it"></select>
+          </label>
+          <label><input id="align" type="checkbox" checked> align with previous map</label>
+          <label><input id="quantize" type="checkbox"> quantized tiles</label>
+          <label class="slider" id="subdivisions-row" hidden>subdivisions <input id="subdivisions" type="range" min="4" max="150" value="40"><output id="subdivisions-out">40</output></label>
+          <label class="slider" id="gap-row" hidden>gap <input id="gap" type="range" min="0" max="0.6" step="0.05" value="0"><output id="gap-out">0</output></label>
+        </div>
+        <p class="hint" id="projection-hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Clustering</h2>
+        <div class="toolbar column">
+          <label class="pick">method <select id="clustering"></select></label>
+          <label class="pick">on
+            <select id="cluster-on">
+              <option value="embedding">the vectors</option>
+              <option value="map">the 2D map</option>
+            </select>
+          </label>
+          <label class="slider" id="k-row">clusters <input id="k" type="range" min="2" max="30" value="8"><output id="k-out">8</output></label>
+          <label class="pick" id="eps-row">eps <input id="eps" type="number" min="0.001" step="0.01" value="0.5"></label>
+          <label class="pick" id="min-samples-row">min samples <input id="min-samples" type="number" min="1" step="1" value="5"></label>
+        </div>
+        <p class="hint" id="cluster-hint"></p>
+        <div id="legend"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Map display</h2>
+        <div class="toolbar column">
+          <label><input id="thumbnails" type="checkbox" checked> tiles <span class="note">(off: dots)</span></label>
+          <label><input id="borders" type="checkbox" checked> borders <span class="note">(cluster colors)</span></label>
+          <label class="slider">size <input id="item-size" type="range" min="6" max="120" value="40"></label>
+          <label class="pick">background <input id="map-bg" type="color" value="#ececec"></label>
+        </div>
+        <p class="hint">Scroll to zoom, drag to pan, double-click to reset (both views).</p>
+        <div class="toolbar">
+          <button id="export-pdf" title="save the map as it is shown now (zoom, pan, highlighted cluster...) as a PDF">Export PDF</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="stage">
+      <section class="panel view-panel">
+        <h2>Embedding map</h2>
+        <div id="map" class="view">
+          <div id="items"></div>
+          <div id="empty" class="empty">upload an image</div>
+        </div>
+      </section>
+
+      <section class="panel view-panel">
+        <div class="view-head">
+          <h2>Image</h2>
+          <div class="toolbar">
+            <label title="on: every tile where it was cut, later tiles cover earlier ones. off: every tile shown whole, side by side (overlapping regions repeat)"><input id="keep-overlap" type="checkbox" checked> keep overlaps</label>
+            <label class="pick" title="what every tile shows: itself, or its cluster's most representative tile (closest to the cluster's center), or the average of all the cluster's tiles (weighted: tiles closer to the center count more). Noise tiles always show themselves.">tiles
+              <select id="tile-source">
+                <option value="original">original</option>
+                <option value="representative">representative</option>
+                <option value="average">average</option>
+                <option value="weighted">weighted average</option>
+              </select>
+            </label>
+            <label class="pick">clusters as
+              <select id="color-mode">
+                <option value="borders">borders</option>
+                <option value="dots">dots</option>
+                <option value="squares">colored squares</option>
+                <option value="tint">gray + tint</option>
+                <option value="none">plain tiles</option>
+              </select>
+            </label>
+            <label class="slider" id="amount-row"><span id="amount-label">amount</span> <input id="amount" type="range" min="0" max="1" step="0.05" value="0.5"><output id="amount-out">0.5</output></label>
+            <button id="save-png" title="the image put back together, at its own resolution (at most 4096 px), as a PNG">Save PNG</button>
+          </div>
+        </div>
+        <div id="tiles-view" class="view">
+          <canvas id="tiles-canvas"></canvas>
+          <div id="tiles-empty" class="empty">upload an image</div>
+        </div>
+      </section>
+
+      <section class="panel info" id="info">
+        <h2>Tile</h2>
+        <p class="hint" id="info-empty">Hover a tile, on the map or in the image.</p>
+        <div id="info-body" hidden>
+          <div class="pair">
+            <figure><img id="info-image" alt=""><figcaption>tile</figcaption></figure>
+            <figure id="info-recon-figure"><img id="info-recon" alt=""><figcaption>reconstruction</figcaption></figure>
+          </div>
+          <div class="info-text">
+            <div id="info-name"></div>
+            <div id="info-box" class="note"></div>
+            <div id="info-cluster"></div>
+            <canvas id="barcode" width="600" height="60"></canvas>
+            <div class="barcode-scale"><span>−2σ</span><span id="barcode-label">vector vs. image mean</span><span>+2σ</span></div>
+            <label><input id="barcode-raw" type="checkbox"> raw values</label>
+            <div id="info-classes" hidden></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="tiles.js"></script>
+</body>
+</html>

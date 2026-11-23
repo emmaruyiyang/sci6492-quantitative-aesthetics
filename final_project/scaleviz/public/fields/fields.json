@@ -1,0 +1,41 @@
+{
+  "galaxy": {
+    "w": 192,
+    "h": 384,
+    "diffuse": {
+      "file": "fields/galaxy_diffuse.bin",
+      "bytes": 73728
+    },
+    "stars": {
+      "file": "fields/galaxy_stars.bin",
+      "bytes": 73728
+    },
+    "color": {
+      "w": 64,
+      "h": 128,
+      "file": "fields/galaxy_color.bin",
+      "bytes": 24576
+    },
+    "diffuseMean": 0.05225561559200287,
+    "starsMean": 0.02105822041630745
+  },
+  "river": {
+    "w": 144,
+    "h": 256,
+    "mask": {
+      "file": "fields/river_mask.bin",
+      "bytes": 36864
+    },
+    "dist": {
+      "file": "fields/river_dist.bin",
+      "bytes": 36864
+    },
+    "spine": {
+      "file": "fields/river_spine.json",
+      "n": 220
+    },
+    "sinuosity": 1.6937,
+    "curvRms": 0.11758,
+    "meanHalfWidth": 0.12048
+  }
+}

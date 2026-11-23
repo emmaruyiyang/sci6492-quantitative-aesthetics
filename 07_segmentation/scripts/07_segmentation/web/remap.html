@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Image Remap</title>
+  <link rel="stylesheet" href="tiles.css">
+  <link rel="stylesheet" href="remap.css">
+</head>
+<body>
+  <header>
+    <h1>Image Remap</h1>
+    <p>The destination image rebuilt from the tiles of the source image: every destination tile gets the source tile that looks most like it.</p>
+  </header>
+
+  <main>
+    <div class="side">
+      <section class="panel">
+        <h2>Images</h2>
+        <div class="drop-pair">
+          <figure>
+            <button id="drop-src" class="dropzone" title="click to pick an image, or drop one here">
+              <img alt="" hidden><span>click or drop</span>
+            </button>
+            <figcaption>source <span class="note">(tiles from)</span></figcaption>
+          </figure>
+          <figure>
+            <button id="drop-dst" class="dropzone" title="click to pick an image, or drop one here">
+              <img alt="" hidden><span>click or drop</span>
+            </button>
+            <figcaption>destination <span class="note">(to rebuild)</span></figcaption>
+          </figure>
+        </div>
+        <button id="swap" title="swap source and destination">⇄ swap</button>
+        <input id="file" type="file" accept="image/*" hidden>
+        <p class="hint" id="images-info"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Tiles</h2>
+        <div class="toolbar column">
+          <label class="pick">tile size (px) <input id="tile-size" type="number" min="8" step="8" value="32"></label>
+          <label class="pick">source tiles
+            <select id="mode"></select>
+          </label>
+          <label class="slider" id="overlap-row">source overlap % <input id="overlap" type="range" min="0" max="90" step="5" value="0"><output id="overlap-out">0</output></label>
+        </div>
+        <p class="hint" id="tiles-info"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Assignment</h2>
+        <div class="toolbar column">
+          <label class="pick">model <select id="model"></select></label>
+          <label class="slider" title="0: only the model's vectors; 1: only the colors and their layout (tiles shrunk to 4 × 4 pixels)">color &amp; layout <input id="color" type="range" min="0" max="1" step="0.05" value="0.5"><output id="color-out">0.5</output></label>
+          <label class="pick" title="0 = no limit (a palette)">max uses per source tile <input id="max-uses" type="number" min="0" step="1" value="1"></label>
+        </div>
+        <p class="hint" id="assignment-hint"></p>
+        <button id="compute" class="primary">Compute assignment</button>
+        <p class="status" id="status">loading…</p>
+        <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+        <div class="toolbar rescan">
+          <button id="rescan" title="look for new model folders">Rescan models</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Display</h2>
+        <div class="toolbar column">
+          <label><input id="grid" type="checkbox" checked> tile grid</label>
+          <label class="slider" title="the destination drawn over the result">destination over it <input id="blend" type="range" min="0" max="1" step="0.05" value="0"><output id="blend-out">0</output></label>
+          <label class="pick">background <input id="map-bg" type="color" value="#ececec"></label>
+        </div>
+        <p class="hint">Result: scroll to zoom, drag to pan, double-click to reset. Hover a tile to see where it came from; hover a source tile to see where it went.</p>
+        <div class="toolbar">
+          <button id="save-png" title="the result at the destination's resolution (at most 4096 px), as a PNG">Save PNG</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="stage remap">
+      <section class="panel view-panel">
+        <h2>Result</h2>
+        <div id="result-view" class="view">
+          <canvas id="result-canvas"></canvas>
+          <div id="result-empty" class="empty">pick a source and a destination</div>
+        </div>
+        <p class="note" id="hover-info">&nbsp;</p>
+      </section>
+
+      <div class="side-views">
+        <section class="panel view-panel">
+          <h2>Destination</h2>
+          <div id="dst-view" class="view small"><canvas></canvas><div class="empty">no destination</div></div>
+        </section>
+        <section class="panel view-panel">
+          <h2>Source</h2>
+          <div id="src-view" class="view small"><canvas></canvas><div class="empty">no source</div></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <script src="remap.js"></script>
+</body>
+</html>

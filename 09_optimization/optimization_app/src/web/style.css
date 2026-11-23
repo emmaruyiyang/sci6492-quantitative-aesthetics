@@ -1,0 +1,433 @@
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+/* Sidebar (tabs) | main view | inspector (save / load, toggles, images); the status bar along the bottom, full width. */
+body {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr) 280px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: #ffffff;
+  color: #000;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 14px;
+}
+
+h2 { font-size: 14px; margin: 4px 0 0; }
+h3 { font-size: 12px; margin: 6px 0 0; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Controls: no fill or borders; bold values mark what is editable, a dotted underline the dropdowns. */
+input, button, select, textarea {
+  font: inherit;
+  color: #000;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 6px;
+  min-width: 0;
+}
+input, select, textarea { font-weight: normal; }
+/* Dropdowns: plain on white with a soft shadow; their arrow is drawn (appearance: none hides the native one). */
+select {
+  appearance: none;
+  font-size: 10px;
+  font-weight: normal;
+  color: #000000;
+  background: #ffffff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0h10L5 6z' fill='%23000'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border-radius: 0px;
+  padding-right: 24px;
+  cursor: pointer;
+  border-bottom: 0px solid black;
+  box-shadow: 0px 6px 8px rgb(0 0 0 / 22%);
+}
+select:focus { color: #000; }
+option { background: #fff; color: #000; font-weight: normal; }
+/* focus: a soft shadow instead of an outline */
+input:focus, select:focus, textarea:focus { outline: none; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25); color: #000; }
+input::placeholder, textarea::placeholder { color: #aaa; }
+button { 
+  cursor: pointer; 
+  font-size: 10px;
+  color: #ffffff; 
+  background: #cecece; 
+  font-weight: bold; 
+  border-radius: 2px 2px 2px 2px; 
+  border: 1px solid #d2d2d2;
+}
+button:hover { background: #444; color: #fff; }
+button:disabled { background: #aaa; color: #fff; cursor: default; }
+
+.row { display: flex; gap: 8px; align-items: flex-end; }
+.row > * { flex: 1; min-width: 0; }
+
+/* Control labels: small and light grey; the controls inside at the same size, in their own colours. */
+label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #989898; }
+label input, label select, label textarea, label button { 
+  font-size: 12px; 
+}
+label.check { flex-direction: row; align-items: center; gap: 6px; }
+label.check input { width: auto; }
+input[type="checkbox"] { 
+  accent-color: #ffffff; 
+}  /* checked: the browser picks a contrasting tick */
+label.inline { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+#sidebar label.inline input, #sidebar label.inline select { width: 7em; flex: 0 0 auto; }
+/* ∅ at the far right: on = white on green, off = pink on transparent */
+.match-toggle { 
+  flex: 0 0 auto; 
+  width: 22px; 
+  height: 22px; 
+  padding: 0; 
+  line-height: 1; 
+  background: #2e9e4f; 
+  color: #fff; 
+  border: none;
+}
+.match-toggle:hover { background: #237a3c; color: #fff; }
+label[data-match].off .match-toggle { background: transparent; color: #e0569b;  }
+label[data-match].off .match-toggle:hover { background: #fde8f2; color: #e0569b; }
+label[data-match] .match-name { flex: 1 1 auto; }
+label[data-match].off > :not(.match-toggle) { opacity: 0.4; }
+.match-target { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.match-pick { width: 30px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; color: #555; background: none; border-radius: 0; }
+.match-pick:hover { background: #f2f2f2; color: #000; }
+.match-pick img { width: 30px; height: 30px; object-fit: contain; display: block; }
+.match-pick.override { outline: 2px solid #000; outline-offset: 1px; }
+.revert { 
+  padding: 0 4px; 
+  background: none; 
+  color: #000; 
+  font-size: 16px; 
+  line-height: 1; 
+  border: none;
+}
+.revert:hover { background: none; color: #555; }
+.revert[hidden] { display: none; }
+
+.muted { color: #555; }
+.small { font-size: 8px; }
+
+/* ── Sidebar ── */
+
+#sidebar {
+  background: #ffffff;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 20px 0px 40px rgb(62 95 95);
+}
+/* Tabs wrap onto as many rows as they need. Each tab has a left separator; the -1px margin
+   plus overflow: hidden clips it on the first tab of every row. */
+.tabs { 
+  display: flex; 
+  flex-wrap: wrap; 
+  overflow: hidden; 
+  border-bottom: 2px solid #000;
+  position: sticky; 
+  top: 0; 
+  z-index: 1; 
+  background: #ffffff; 
+  padding-top: 0px; 
+}
+.tabs button { 
+  flex: 1 1 auto; 
+  border-radius: 0; 
+  font-weight: normal; 
+  margin-left: -1px; 
+  border-left: 1px solid #ebebeb; 
+  padding: 5px 8px; 
+  background: none; 
+  color: #000000; 
+  font-size: 11px; 
+  white-space: nowrap; 
+}
+.tabs button:hover { background: #f2f2f2; color: #000; }
+.tabs button[aria-selected="true"] { 
+  background: #969696; 
+  color: #fff; 
+  font-weight: bold; 
+  border: none;
+  box-shadow: 0px 0px 10px rgb(0 0 0 / 39%);
+}
+/* The Status tab: orange with warnings since the last run started, red after an error. */
+.tabs button[data-level="warning"], .tabs button[data-level="warning"]:hover { background: #ff9800; color: #000; }
+.tabs button[data-level="error"], .tabs button[data-level="error"]:hover { background: #e53935; color: #fff; }
+.status-log { height: calc(100vh - 150px); overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.35; }
+.status-entry { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 6px; border-left: 3px solid #ff9800; }
+.status-entry[data-level="error"] { border-left-color: #e53935; }
+.status-entry .when { color: #777; }
+#sidebar .tab-panel {
+  display: flex;
+  flex-direction: column; 
+  gap: 8px; 
+  padding: 10px; 
+}
+#sidebar .tab-panel[hidden] { display: none; }
+#sidebar input:not([type="checkbox"]), #sidebar select, #sidebar textarea { width: 100%; }
+#sidebar textarea { resize: vertical; line-height: 1.3; }
+.only { display: flex; flex-direction: column; gap: 8px; }
+.only[hidden] { display: none; }
+.conv-generative[hidden], .conv-inplace[hidden] { display: none; }
+.patch-pixels[hidden], .patch-images[hidden] { display: none; }
+.shape-mode[hidden] { display: none; }
+.patch-image-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.patch-image { display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
+.patch-image .match-pick { width: 56px; height: 56px; outline: 1px solid #ccc; }
+.patch-image .match-pick img { width: 56px; height: 56px; }
+.patch-image input { width: 56px; }
+.patch-image .patch-image-remove { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; padding: 0;
+  line-height: 14px; font-size: 12px; border-radius: 50%; background: #fff; color: #000; border: 1px solid #999; }
+.bg-image { display: flex; align-items: flex-start; gap: 10px; }
+.bg-image-thumb { flex: none; position: relative; }
+.bg-image-thumb .match-pick { width: 56px; height: 56px; outline: 1px solid #ccc; font-size: 18px; }
+.bg-image-thumb .match-pick img { width: 56px; height: 56px; }
+.bg-image-thumb .patch-image-remove { position: absolute; top: -6px; right: -6px; width: 16px; height: 16px; padding: 0;
+  line-height: 14px; font-size: 12px; border-radius: 50%; background: #fff; color: #000; border: 1px solid #999; }
+.bg-image-thumb .patch-image-remove[hidden] { display: none; }
+.bg-image-options { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.bg-image-options[hidden] { display: none; }
+.family { display: flex; flex-direction: column; gap: 8px; }
+.family[hidden] { display: none; }
+
+/* ── Toolbar and status bar ── */
+
+#workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* run controls on the left; the separator and the save / config group pushed to the right */
+#statusbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; border-top: 2px solid #000; min-width: 0; }
+.status { flex: 1 1 auto; min-width: 0; padding: 5px 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status.error { background: #000; color: #fff; }
+.budget { flex: 0 0 160px; height: 8px; margin-right: 16px; border: 1px solid #000; }
+.budget[hidden] { display: none; }
+#budget-bar { height: 100%; width: 0; background: #000; }
+
+.thumb { width: 100%; border: 0px solid #000; image-rendering: auto; }
+
+.targets { display: flex; flex-direction: column; gap: 6px; }
+.target {
+  display: grid;
+  gap: 4px;
+  align-items: center;
+  background: #68ac9e;
+  padding: 8px;
+  border-radius: 2px;
+  box-shadow: 8px 8px 5px rgb(62 95 95);
+}
+.target.text { grid-template-columns: 1fr 4.5em 2em; }
+.target.direction { grid-template-columns: 3.8em 1fr 2em; border-left: 2px solid #000; padding: 4px 0 4px 8px; }
+.target.direction input.prompt { grid-column: 2 / -1; }
+.target .tag { font-size: 12px; color: #555; }
+.target button { padding: 4px 0; }
+.target input.prompt.invalid { outline: 2px solid #c0392b; }
+.target .image-pick { background: none; border-radius: 0; padding: 2px; width: 68px; height: 68px; justify-self: start; display: flex; align-items: center; justify-content: center; color: #555; font-size: 12px; }
+.target .image-pick img { height: 64px; width: 64px; object-fit: contain; display: block; }
+.target.direction .image-pick { grid-column: 2 / -1; }
+.target .query { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.target.direction .query { grid-column: 2 / -1; }
+.axis-thumb { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; margin-right: 4px; }
+
+/* ── Main: fits the viewport, nothing scrolls; images and the plot shrink ── */
+
+main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #d0dedf;
+  box-shadow: 0px 0px 40px rgb(62 95 95);
+}
+
+/* The current image fills what the plot leaves; the gradient overlays it (screen: black = no change). */
+.stage-wrap { flex: 1 1 55%; min-height: 160px; display: flex; flex-direction: column; gap: 3px; position: relative; }
+
+/* Run controls, top left over the image. Extruded buttons (after DiffDrawing's .vis-btn): the
+   black left / bottom border is the depth, the clip-path chamfers it; pressed, the face slides
+   down-left into it and the depth is clipped away. */
+.run-controls { position: absolute; top: 0; left: 0; z-index: 2; display: flex; gap: 6px; }
+/* The 3D fields' view toggle, top right over the image, in the run buttons' style. */
+.view-controls { position: absolute; top: 0; right: 0; z-index: 2; display: flex; gap: 6px; }
+.run-btn {
+  --b: 1px;   /* border */
+  --c: 5px;   /* depth */
+  box-sizing: border-box;
+  width: calc(32px + var(--c));
+  height: calc(28px + var(--c));
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: #000;
+  background: #fff;
+  border: solid #000;
+  border-width: var(--b) var(--b) calc(var(--c) + var(--b)) calc(var(--c) + var(--b));
+  transition: transform 0.08s, clip-path 0.08s;
+  clip-path: polygon(0% var(--c), var(--c) 0%, 100% 0%, 100% calc(100% - var(--c)),
+                     calc(100% - var(--c)) 100%, 0% 100%);
+}
+.run-btn { border-radius: 0; }
+.run-btn[hidden] { display: none; }
+.run-btn svg { width: 16px; height: 16px; fill: currentColor; display: block; }
+.run-btn:hover { background: #f2f2f2; color: #000; }
+.run-btn:active {
+  transform: translate(calc(var(--c) / -1), var(--c));
+  clip-path: polygon(var(--c) 0%, 100% 0%, 100% calc(100% - var(--c)), var(--c) calc(100% - var(--c)));
+}
+.run-btn.on { background: #000; color: #fff; }  /* paused: resume */
+.run-btn.on:hover { background: #333; color: #fff; }
+.stage { flex: 1 1 auto; min-height: 0; position: relative; }
+.stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block;}
+.stage img[hidden], .stage img:not([src]) { display: none; }
+.stage img.overlay { mix-blend-mode: screen; opacity: 0.85; pointer-events: none; }
+figcaption { font-size: 12px; padding-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Inspector: toggles over the secondary images ── */
+#inspector { 
+  background: white;
+  min-height: 0; 
+  overflow-y: auto; 
+  display: flex; 
+  flex-direction: column; 
+}
+#inspector .inspector-head { 
+  position: sticky; 
+  top: 0; 
+  z-index: 1; 
+  background: #ffffff; 
+}
+#inspector .files { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-bottom: 2px solid #000; }
+#inspector .files .row > button { white-space: nowrap; }
+#inspector .files label.check { font-size: 12px; }
+#inspector #note { white-space: pre-wrap; word-break: break-all; }
+#inspector .toggles { display: flex; flex-wrap: wrap; gap: 4px 12px;
+                      padding: 10px 12px; border-bottom: 2px solid #000; font-size: 12px; }
+#inspector .gain { order: 1; flex: 1 0 100%; }
+#inspector .gain input { width: 5em; }
+#inspector .panels { display: flex; flex-direction: column; gap: 1px; padding: 1px 2px; }
+#inspector figure { margin: 0; }
+#inspector figure[hidden] { display: none; }
+#inspector figure img { 
+  width: 100%; 
+  display: block; 
+  border: 0px solid #000; 
+  background: #eee; 
+}
+
+/* Map and table span the middle frame edge to edge and sit on its bottom (main's padding cancelled). */
+.plot-panel { flex: 1 1 45%; min-height: 0; margin: 0 -16px -12px; display: flex; flex-direction: column; gap: 0; }
+#plot { flex: 1 1 0; min-height: 0; width: 100%; display: block; border-top: 1px solid #000; }
+
+#values { flex: 0 0 auto; width: 100%; border-collapse: collapse; font-size: 12px; }
+#values th { background: #ffffff; color: #000000; }
+#values td, #values th { line-height: 1.15; }
+#values th, #values td { border: none; padding: 3px 8px; text-align: right; }
+#values th:first-child, #values td:first-child { text-align: left; }
+
+#sidebar > * { flex-shrink: 0; }
+.plot-controls { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; font-size: 12px; padding: 4px 16px; }
+.plot-controls input[type="number"] { width: 4.5em; }
+textarea:disabled, input:disabled { color: #aaa; background: transparent; }
+
+/* ── Model list / property sheet ── */
+.model-list { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 4px; 
+  padding: 8px;
+  background: #ffffff;
+  border-top: 0px solid black;
+  border-bottom: 2px solid black;
+  box-shadow: 0px 4px 10px rgb(0 0 0 / 17%);
+}
+.model-item { display: grid; grid-template-columns: 1fr 2em; gap: 4px; }
+.model-item .model-pick { border:none; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: #f2f2f2; color: #000; }
+.model-item .model-pick .small { color: #b0b0b0; font-weight:normal;}
+.model-item.selected .model-pick { background: #ffd1fe; color: #fff; }
+.model-item.selected .model-pick .small { color: #0000006e; font-weight:normal; }
+.model-sheet { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 8px; 
+  border-left: 0px solid #000; 
+  padding: 4px 10px 4px 8px;
+  background: #ffd1fe;
+}
+.model-sheet[hidden], .sheet-only[hidden] { display: none; }
+div.sheet-only { display: flex; flex-direction: column; gap: 8px; }
+.model-sheet label.sheet-only { gap: 3px; }
+
+/* ── Surface ── */
+.surface-panel h2 { margin-top: 6px; }
+/* the preview stays in view while the controls below scroll */
+.surface-preview { position: sticky; top: 0; z-index: 1; background: #fff; padding: 4px 0; display: flex; flex-direction: column; gap: 2px; }
+.surface-preview img { width: 100%; max-height: 40vh; object-fit: contain; display: block; border: 1px solid #000; background: #eee; }
+.surface-preview img:not([src]) { aspect-ratio: 1; }
+#surface-preview-note.error { color: #c0392b; }
+.param-block { display: flex; flex-direction: column; gap: 6px; }
+.param-row { display: flex; flex-direction: column; gap: 3px; }
+.param-list { display: grid; gap: 3px 4px; align-items: center; font-size: 12px; }
+#sidebar .param-list input:not([type="checkbox"]) { font-size: 12px; padding: 3px 4px; }
+.param-list .head { flex-direction: row; align-items: center; gap: 3px; white-space: nowrap; overflow: hidden; color: #555; }
+.param-list .head input { margin: 0; flex: 0 0 auto; }
+.param-list .idx { color: #555; text-align: right; }
+.param-list button { padding: 3px 0; font-size: 12px; }
+#sidebar input[type="color"] { height: 28px; padding: 2px; }
+/* LEVELSET: a two-line block per layer */
+.levelset-list { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.levelset-list .layer { 
+  display: flex; 
+  flex-direction: column; 
+  gap: 3px; 
+  padding-bottom: 6px; 
+  border-bottom: 1px dotted #bbb; 
+  background: #ffffff;
+  margin-left: 10px;
+  margin-right: 10px;
+  padding: 5px;
+  border-radius: 0px;
+  border: none;
+  box-shadow: 10px 10px 10px rgb(0 0 0 / 30%);
+}
+.levelset-list .layer-line { display: flex; align-items: center; gap: 6px; }
+.levelset-list .idx { flex: 0 0 1.4em; color: #555; text-align: right; }
+.levelset-list .field { flex: 1 1 0; min-width: 0; flex-direction: row; align-items: center; gap: 3px; }
+.levelset-list .field .head { flex: 0 0 auto; color: #555; }
+#sidebar .levelset-list input:not([type="checkbox"]) { flex: 1 1 0; min-width: 0; width: auto; font-size: 12px; padding: 3px 4px; }
+#sidebar .levelset-list input[type="color"] { height: 22px; padding: 1px; }
+.levelset-list select { flex: 1 1 0; min-width: 0; font-size: 12px; }
+.levelset-list input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+.levelset-list .field.opt { flex: 0 0 auto; gap: 4px; }
+.levelset-list .layer-line > button { margin-left: auto; }
+.levelset-list button { flex: 0 0 1.7em; padding: 3px 0; font-size: 12px; }
+#surface-current { margin: 0; white-space: pre; overflow-x: auto; }
+#surface-current-block { display: flex; flex-direction: column; gap: 6px; }
+#surface-current-block[hidden] { display: none; }
+/* REVOLUTION */
+.rev-mode, #revolution-texture-options { display: flex; flex-direction: column; gap: 8px; }
+.rev-mode[hidden], #revolution-texture-options[hidden], #revolution-color-row[hidden] { display: none; }
+#revolution-preview-note.error, #revolution-formula-note.error { color: #c0392b; }
+#revolution-current { margin: 0; white-space: pre; overflow-x: auto; }
+
+#note.error { color: #c0392b; }
+#values td:not(:first-child), #values th:not(:first-child) { white-space: nowrap; }
+#values tr.total td { font-weight: bold; }
+#values tr.active td { font-weight: bold; background: #f2f2f2; }  /* sequential mode: the target scored now */
+#values .loss-graph { display: block; width: 120px; height: 20px; background: #fff; }
+#values td:has(.loss-graph) { padding: 2px 4px; }
+
+/* The "×" remove buttons of the lists (targets, models, level sets, cameras, ...). */
+button.remove {
+  border-radius: 1px;
+  background: rgb(255 73 68);
+  color: #e8e8e8;
+  border: none;
+  box-shadow: 0px 0px 5px rgb(255 96 68);
+}
+button.remove:hover { background: rgb(200 40 36); }
+#sheet-templates-label[hidden] { display: none; }

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Similar Words</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<h1>Most similar words</h1>
+
+<form id="query-form">
+  <input id="word" type="text" value="architecture" placeholder="a word" required>
+  <input id="top_n" type="number" value="10" min="1" max="100">
+  <button type="submit">Run query</button>
+</form>
+
+<div id="results"></div>
+
+<script src="/web/app.js"></script>
+
+</body>
+</html>

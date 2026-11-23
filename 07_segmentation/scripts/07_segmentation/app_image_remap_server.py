@@ -1,0 +1,414 @@
+"""Image Remap (web/remap.html): rebuild one image, the destination, out of
+the tiles of another, the source.
+
+    destination  ->  square tiles, size x size        ->  vectors  \
+                                                                     cost  ->  assignment  ->  result
+    source       ->  tiles (same grid, or same size)  ->  vectors  /
+
+The destination is cut into size x size tiles (what is left at its right and
+bottom edges, less than a tile, is not used). The source is cut either
+
+  grid   into the same number of columns and rows: the source tiles are
+         rectangles of the source's proportions, stretched into the
+         destination's squares
+  size   into tiles of the same size (with an optional overlap, for more
+         tiles to pick from): a different number of tiles
+
+Every tile gets a vector from a model (see embedders.py; compared by cosine
+distance), and a "color & layout" vector: the tile shrunk to 4 x 4 pixels.
+The cost of putting source tile j at destination tile i blends both
+distances (each divided by its mean, so they are on the same scale):
+
+    cost = (1 - color) * model distance + color * color & layout distance
+
+Then every destination tile gets a source tile, each source tile used at
+most `max uses` times:
+
+  0      no limit: every destination tile simply takes its nearest source
+         tile, the source is a palette (some tiles used many times, some never)
+  1      every source tile at most once. With as many source tiles as
+         destination tiles (grid) this is a 1-1 assignment: every source tile
+         is used exactly once, the result is a permutation of the source
+  k      at most k times each
+
+With a limit it is a linear assignment problem, solved exactly (the
+Hungarian method, scipy's linear_sum_assignment) on the cost matrix with every
+source tile repeated k times. If there are fewer than destination tiles / k
+source tiles, k is raised until there are enough.
+
+Run it and open http://127.0.0.1:5004
+"""
+
+import io
+import os
+import itertools
+import math
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import numpy as np
+import torch
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
+from PIL import Image, ImageOps
+
+from embedders import find_models, load_embedder
+
+HERE = Path(__file__).resolve().parent
+WEB = HERE / "web"
+
+# QA2026_DEVICE=cpu falls back to the CPU if something does not run on Apple's MPS.
+def _pick_device():
+    forced = os.environ.get("QA2026_DEVICE")
+    if forced:
+        return torch.device(forced)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+DEVICE = _pick_device()
+
+ROOT_MODEL_FOLDER = os.environ.get(
+    "QA2026_MODELS",
+    str(Path(__file__).resolve().parents[3] / "05_classifiers" / "models"))
+DEFAULT_MODEL = "pretrained/dinov2_vits14"
+PIXELS_MODEL = "pixels"     # no model: colors & layout only
+
+MAX_SIDE = 4096             # bigger uploads are scaled down to this longest side
+MAX_TILES = 4000            # per image
+MAX_COST_CELLS = 40_000_000     # destination tiles x source tiles x max uses, for the assignment
+MIN_TILE = 8
+MAX_OVERLAP = 90            # percent, source tiles in "size" mode
+KEEP_IMAGES = 6             # uploaded images kept in memory
+LAYOUT_SIDE = 4             # color & layout vector: the tile shrunk to this many pixels square
+BATCH_SIZE = 32
+PORT = 5004
+
+MODES = {"grid": "same columns × rows", "size": "same tile size"}
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024     # uploads
+
+# One model in memory at a time, one computation at a time
+model_lock = threading.Lock()
+job_lock = threading.Lock()
+loaded = {"id": None, "embedder": None}
+
+models = {}                 # id -> {"id", "label", "kind", "path"}
+images = {}                 # token -> {"image": PIL RGB, "name"}
+embeddings = {}             # (model id, token, boxes) -> array [tiles, D]
+jobs = {}                   # job id -> progress and result
+next_job = itertools.count(1)
+
+
+def scan_models() -> None:
+    found = {m["id"]: m for m in find_models(ROOT_MODEL_FOLDER)}
+    models.clear()
+    models.update(found)
+    print(f"{len(models)} models")
+
+
+# ---------------------------------------------------------------------------
+# Images and tiles
+# ---------------------------------------------------------------------------
+
+def uploaded(token: str) -> Image.Image:
+    """410 (gone) when the server doesn't have it (restarted, or too many
+    uploads since): the page then uploads the image again."""
+    if token not in images:
+        abort(410, "upload the image again")
+    return images[token]["image"]
+
+
+def forget(token: str) -> None:
+    images.pop(token, None)
+    for key in [k for k in embeddings if k[1] == token]:
+        embeddings.pop(key)
+
+
+def tile_layout(src: Image.Image | None, dst: Image.Image, size: int, mode: str, overlap: float) -> dict:
+    """The tiles of both images, row by row, as boxes [x, y, w, h]"""
+    width, height = dst.size
+    size = max(1, min(max(MIN_TILE, int(size)), width, height))
+    cols, rows = width // size, height // size
+    layout = {"dst": {"cols": cols, "rows": rows, "size": size, "count": cols * rows,
+                      "boxes": [[c * size, r * size, size, size] for r in range(rows) for c in range(cols)]},
+              "src": None}
+    if src is None:
+        return layout
+    sw, sh = src.size
+    if mode == "grid":
+        # boundaries rounded to whole pixels: the tiles differ by at most one pixel
+        xs = [round(c * sw / cols) for c in range(cols + 1)]
+        ys = [round(r * sh / rows) for r in range(rows + 1)]
+        boxes = [[xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r]] for r in range(rows) for c in range(cols)]
+        layout["src"] = {"cols": cols, "rows": rows, "tile": [round(sw / cols, 1), round(sh / rows, 1)],
+                         "count": cols * rows, "boxes": boxes}
+    else:
+        s = min(size, sw, sh)
+        overlap = min(max(float(overlap), 0.0), MAX_OVERLAP)
+        stride = max(1, math.floor(s * (1 - overlap / 100) + 0.5))
+        scols, srows = (sw - s) // stride + 1, (sh - s) // stride + 1
+        layout["src"] = {"cols": scols, "rows": srows, "tile": [s, s], "stride": stride, "count": scols * srows,
+                         "boxes": [[c * stride, r * stride, s, s] for r in range(srows) for c in range(scols)]}
+    return layout
+
+
+def layout_of(body: dict) -> tuple[Image.Image | None, Image.Image, dict]:
+    if body.get("mode", "grid") not in MODES:
+        abort(400, f"unknown mode {body.get('mode')}")
+    src = uploaded(body["src"]) if body.get("src") else None
+    dst = uploaded(body["dst"])
+    return src, dst, tile_layout(src, dst, int(body.get("size", 32)), body.get("mode", "grid"),
+                                 float(body.get("overlap", 0)))
+
+
+def crops(image: Image.Image, boxes: list, side: int | None = None) -> list[Image.Image]:
+    """The tiles, stretched into squares (side x side, or their longer side)"""
+    out = []
+    for x, y, w, h in boxes:
+        s = side or max(w, h)
+        out.append(image.crop((x, y, x + w, y + h)).resize((s, s), Image.BILINEAR if side is None else Image.BOX))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Vectors, cost, assignment
+# ---------------------------------------------------------------------------
+
+class Cancelled(Exception):
+    pass
+
+
+def load_model(model_id: str) -> None:
+    """Called with model_lock held."""
+    if loaded["id"] == model_id:
+        return
+    loaded["id"], loaded["embedder"] = None, None   # free the previous one first
+    if DEVICE.type == "cuda":
+        torch.cuda.empty_cache()
+    print(f"loading {model_id}")
+    loaded["embedder"] = load_embedder(models[model_id], DEVICE)
+    loaded["id"] = model_id
+    print(loaded["embedder"].description)
+
+
+def get_embeddings(model_id: str, token: str, boxes: list, job: dict, what: str) -> np.ndarray:
+    """Model vectors [tiles, D] of these tiles of an image, L2-normalized"""
+    key = (model_id, token, tuple(map(tuple, boxes)))
+    if key not in embeddings:
+        image = uploaded(token)
+        vectors = []
+        with model_lock:
+            job["stage"] = f"loading {models[model_id]['label']}"
+            load_model(model_id)
+            for start in range(0, len(boxes), BATCH_SIZE):
+                if job["cancelled"]:
+                    raise Cancelled()
+                job["stage"] = f"embedding the {what} tiles {start}/{len(boxes)}"
+                job["progress"] = start / len(boxes)
+                batch = crops(image, boxes[start:start + BATCH_SIZE])
+                vectors.append(loaded["embedder"].embed(batch).flatten(1).numpy().astype(np.float32))
+        x = np.concatenate(vectors)
+        embeddings[key] = x / np.maximum(np.linalg.norm(x, axis=1, keepdims=True), 1e-8)
+    return embeddings[key]
+
+
+def layout_vectors(image: Image.Image, boxes: list) -> np.ndarray:
+    """Color & layout: every tile shrunk to LAYOUT_SIDE x LAYOUT_SIDE pixels, 0..1"""
+    return np.stack([np.asarray(t, dtype=np.float32).ravel() / 255
+                     for t in crops(image, boxes, LAYOUT_SIDE)])
+
+
+def distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Squared euclidean distance of every row of a to every row of b"""
+    d = (a * a).sum(1)[:, None] + (b * b).sum(1)[None] - 2 * a @ b.T
+    return np.maximum(d, 0)
+
+
+def assign(cost: np.ndarray, max_uses: int) -> tuple[np.ndarray, int]:
+    """-> (source tile of every destination tile, the limit actually used: 0 = none)"""
+    n_dst, n_src = cost.shape
+    if max_uses <= 0:
+        return cost.argmin(axis=1), 0
+    uses = max(max_uses, math.ceil(n_dst / n_src))      # enough source tiles for every destination tile
+    if n_dst * n_src * uses > MAX_COST_CELLS:
+        raise ValueError(f"{n_dst} x {n_src} tiles x {uses} uses is too big to assign: "
+                         f"use bigger tiles or no limit (0)")
+    from scipy.optimize import linear_sum_assignment
+    # every source tile repeated `uses` times: column m * n_src + j is a copy of tile j
+    rows, columns = linear_sum_assignment(np.tile(cost, (1, uses)))
+    out = np.empty(n_dst, dtype=int)
+    out[rows] = columns % n_src
+    return out, uses
+
+
+def run_job(job: dict, p: dict) -> None:
+    try:
+        with job_lock:
+            timings = {}
+            src_boxes, dst_boxes = p["layout"]["src"]["boxes"], p["layout"]["dst"]["boxes"]
+            start = time.perf_counter()
+            color = p["color"] if p["model"] != PIXELS_MODEL else 1.0
+            cost = 0
+            if color < 1:
+                a = get_embeddings(p["model"], p["dst"], dst_boxes, job, "destination")
+                b = get_embeddings(p["model"], p["src"], src_boxes, job, "source")
+                d = distances(a, b)
+                cost = cost + (1 - color) * d / max(float(d.mean()), 1e-8)
+            if color > 0:
+                job["stage"] = "colors & layout"
+                d = distances(layout_vectors(uploaded(p["dst"]), dst_boxes),
+                              layout_vectors(uploaded(p["src"]), src_boxes))
+                cost = cost + color * d / max(float(d.mean()), 1e-8)
+            timings["vectors"] = time.perf_counter() - start
+            if job["cancelled"]:
+                raise Cancelled()
+
+            job["stage"] = "assigning" + (f" (max {p['max_uses']} uses each)" if p["max_uses"] else "")
+            job["progress"] = 1.0
+            start = time.perf_counter()
+            assignment, uses = assign(cost, p["max_uses"])
+            timings["assignment"] = time.perf_counter() - start
+            chosen = cost[np.arange(len(assignment)), assignment]
+            job["result"] = {
+                "assignment": assignment.tolist(),          # destination tile -> source tile
+                "cost": np.round(chosen, 4).tolist(),
+                "mean_cost": round(float(chosen.mean()), 4),
+                "max_uses": uses,                           # 0 = no limit
+                "used": int(len(set(assignment.tolist()))),     # distinct source tiles used
+                "seconds": {k: round(v, 2) for k, v in timings.items()},
+            }
+            job["stage"] = "done"
+    except Cancelled:
+        job["stage"] = "cancelled"
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        job["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        job["finished"] = True
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/")
+def index():
+    return send_from_directory(WEB, "remap.html")
+
+
+@app.route("/<path:name>")
+def static_file(name):
+    return send_from_directory(WEB, name)
+
+
+@app.get("/api/options")
+def options():
+    model_list = [{k: m[k] for k in ("id", "label", "kind")} for m in models.values()]
+    return jsonify({
+        "models": model_list,
+        "pixels_model": PIXELS_MODEL,
+        "default_model": DEFAULT_MODEL if DEFAULT_MODEL in models else PIXELS_MODEL,
+        "modes": MODES,
+        "max_tiles": MAX_TILES,
+        "min_tile": MIN_TILE,
+        "max_overlap": MAX_OVERLAP,
+    })
+
+
+@app.post("/api/rescan")
+def rescan():
+    scan_models()
+    return options()
+
+
+@app.post("/api/upload")
+def upload():
+    """An image from the page: kept in memory (EXIF rotation applied, at most
+    MAX_SIDE pixels along its longest side) until KEEP_IMAGES newer ones came."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        abort(400, "no file")
+    try:
+        image = ImageOps.exif_transpose(Image.open(file.stream)).convert("RGB")
+    except Exception as e:
+        abort(400, f"can't read {file.filename} as an image: {e}")
+    original = image.size
+    image.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
+    token = uuid.uuid4().hex
+    for old in list(images)[:-(KEEP_IMAGES - 1)]:
+        forget(old)
+    images[token] = {"image": image, "name": Path(file.filename).name}
+    return jsonify({"token": token, "name": images[token]["name"], "width": image.width,
+                    "height": image.height, "original": original})
+
+
+@app.get("/api/image/<token>")
+def image_file(token: str):
+    """The image as the server cuts it (maybe scaled down): the page draws
+    the tiles out of this one, so both agree to the pixel."""
+    image = uploaded(token)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=92)
+    response = send_file(io.BytesIO(buffer.getvalue()), mimetype="image/jpeg")
+    response.headers["Cache-Control"] = "max-age=3600"
+    return response
+
+
+@app.post("/api/layout")
+def layout():
+    """The tiles of both images (the source may be missing), for drawing"""
+    return jsonify(layout_of(request.get_json())[2])
+
+
+@app.post("/api/compute")
+def compute():
+    """Start an assignment. Returns a job id to poll with /api/job/<id>.
+    Any earlier job still running is cancelled."""
+    body = request.get_json()
+    if not body.get("src"):
+        abort(400, "pick a source image")
+    _, _, tiles = layout_of(body)
+    p = {
+        "src": body["src"], "dst": body["dst"], "layout": tiles,
+        "model": body.get("model", DEFAULT_MODEL),
+        "color": min(max(float(body.get("color", 0.5)), 0.0), 1.0),
+        "max_uses": max(0, int(body.get("max_uses", 1))),
+    }
+    if p["model"] != PIXELS_MODEL and p["model"] not in models:
+        abort(404, f"no model {p['model']}")
+    for side in ("src", "dst"):
+        if tiles[side]["count"] > MAX_TILES:
+            abort(400, f"{tiles[side]['count']} {'source' if side == 'src' else 'destination'} tiles, "
+                       f"at most {MAX_TILES}: make them bigger")
+
+    for old in jobs.values():
+        old["cancelled"] = True
+    job_id = next(next_job)
+    jobs[job_id] = {"id": job_id, "stage": "waiting", "progress": 0.0, "cancelled": False,
+                    "finished": False, "result": None, "error": None}
+    threading.Thread(target=run_job, args=(jobs[job_id], p), daemon=True).start()
+    return jsonify({"job": job_id})
+
+
+@app.get("/api/job/<int:job_id>")
+def job_status(job_id: int):
+    if job_id not in jobs:
+        abort(404)
+    job = jobs[job_id]
+    if job["finished"]:
+        jobs.pop(job_id)    # the result is collected once
+    return jsonify({k: job[k] for k in ("id", "stage", "progress", "finished", "result", "error")})
+
+
+if __name__ == "__main__":
+    print(f"device: {DEVICE}")
+    scan_models()
+    # no debug reloader: it would start the app (and load the model) twice
+    app.run(port=PORT, threaded=True)

@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic Topography</title>
+<style>
+  :root {
+    --ink: #e8e8e6;
+    --panel: #15171a;
+    --line: #2c3036;
+    --accent: #7fd1b9;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0b0c0e;
+    color: var(--ink);
+    font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+    overflow: hidden;
+  }
+  #view { position: fixed; inset: 0; }
+  #panel {
+    position: fixed; top: 16px; left: 16px; width: 252px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; backdrop-filter: blur(8px);
+    max-height: calc(100% - 32px); overflow-y: auto;
+  }
+  h1 { font-size: 13px; margin: 0 0 2px; letter-spacing: .02em; }
+  .sub { color: #8b9199; font-size: 11px; margin: 0 0 12px; }
+  fieldset { border: 0; border-top: 1px solid var(--line); margin: 12px 0 0; padding: 10px 0 0; }
+  legend { color: #8b9199; font-size: 11px; padding: 0 6px 0 0; }
+  label { display: block; margin: 8px 0; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .row span:last-child { color: var(--accent); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, button {
+    width: 100%; background: #0b0c0e; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+    font: inherit;
+  }
+  button { cursor: pointer; margin-top: 8px; }
+  button:hover { border-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; }
+  .check input { accent-color: var(--accent); }
+  #status { color: #8b9199; font-size: 11px; margin-top: 10px; min-height: 1.4em; }
+  #hint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: #6b7178; font-size: 11px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="panel">
+  <h1>Semantic Topography</h1>
+  <p class="sub">cell &middot; depth &rarr; autoencoder &rarr; tiles</p>
+
+  <label>
+    height field
+    <select id="file"></select>
+  </label>
+
+  <label>
+    surface
+    <select id="surface">
+      <option value="">alabaster (height only)</option>
+      <option value="_albedo.png">original crop</option>
+      <option value="_clusters_k8.png">autoencoder cluster &middot; 8</option>
+      <option value="_clusters_k3.png">autoencoder cluster &middot; 3</option>
+    </select>
+  </label>
+
+  <fieldset>
+    <legend>relief</legend>
+    <label>
+      <span class="row"><span>exaggeration</span><span id="exag-out">0.015</span></span>
+      <input id="exag" type="range" min="0" max="0.5" step="0.002" value="0.015">
+    </label>
+    <label>
+      <span class="row"><span>slab thickness</span><span id="thick-out">0.04</span></span>
+      <input id="thick" type="range" min="0" max="0.3" step="0.005" value="0.04">
+    </label>
+    <label>
+      <span class="row"><span>mesh resolution</span><span id="res-out">900</span></span>
+      <input id="res" type="range" min="120" max="900" step="60" value="900">
+    </label>
+    <label>
+      <span class="row"><span>smoothing</span><span id="blur-out">3</span></span>
+      <input id="blur" type="range" min="0" max="40" step="1" value="3">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>light</legend>
+    <label>
+      <span class="row"><span>azimuth</span><span id="az-out">135&deg;</span></span>
+      <input id="az" type="range" min="0" max="360" step="1" value="135">
+    </label>
+    <label>
+      <span class="row"><span>elevation</span><span id="el-out">38&deg;</span></span>
+      <input id="el" type="range" min="5" max="85" step="1" value="38">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>surface</legend>
+    <label class="check"><input id="wire" type="checkbox"> wireframe</label>
+    <label class="check"><input id="spin" type="checkbox"> auto-rotate</label>
+    <button id="shot">save PNG</button>
+  </fieldset>
+
+  <p id="status">loading…</p>
+</div>
+
+<p id="hint">drag to orbit &middot; scroll to zoom &middot; right-drag to pan</p>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// The mosaics 06_b_tile_mosaic.py writes. The 8-bit preview is what a browser
+// can read back pixel by pixel: a canvas decodes a 16-bit PNG to 8 bits anyway,
+// and the extra depth only matters for Rhino and Blender, not for this view.
+const FILES = [
+  ['walls/cell_depth_on_tube_amp0.2_r0.42-0.09_pinch2_36x36_g0.22_preview.png', 'WALL · cell tiles on the tube'],
+  ['fields/tube_amp0.2_r0.42-0.09_pinch2_preview.png', 'field only · tube, wide ends'],
+  ['fields/tube_amp0.2_r0.26-0.07_pinch3.5_preview.png', 'field only · tube, long waist'],
+  ['fields/fan_s9_sp0.35_op3_r0.05_preview.png', 'field only · fan, 9 strands'],
+  ['fields/tube_amp0.18_r0.105-0.065_pinch2_preview.png', 'field only · soft tube'],
+  ['cell/cell_depth_flow_36x36_base0.12_strands3_preview.png', 'cell · flowing channel'],
+  ['galaxy/galaxy_flow_48x48_base0.45_strands5_preview.png', 'galaxy · braided channel'],
+  ['galaxy/galaxy_flow_44x44_base0.45_strands5_preview.png', 'galaxy · single channel'],
+  ['cell/cell_24x24_gap0_base0_preview.png', 'cell · 24 x 24  (79% full)'],
+  ['cell/cell_23x23_gap0_base0_preview.png', 'cell · 23 x 23  (densest)'],
+  ['cell/cell_26x26_gap0_base0_preview.png', 'cell · 26 x 26'],
+  ['cell/cell_32x32_gap0_base0_preview.png', 'cell · 32 x 32'],
+  ['cell/cell_45x45_gap0_base0_preview.png', 'cell · 45 x 45'],
+  ['cell/cell_70x70_gap0_base0_preview.png', 'cell · 70 x 70  (sparsest)'],
+  ['cell/cell_24x24_gap0_base0.35_preview.png', 'cell · 24 x 24  (cluster base 0.35)'],
+];
+const BASE = '../data/topography/';
+
+const $ = (id) => document.getElementById(id);
+const status = (text) => { $('status').textContent = text; };
+
+// --- scene ------------------------------------------------------------------
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.35;   // ACES rolls the highlights off, so a
+                                       // white cast needs the exposure back up
+$('view').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0b0c0e');
+
+// Transmission samples whatever is behind the surface, and behind this one is
+// an empty black page -- so a translucent material would only read as darker.
+// A soft room gives it something to carry through and lets the thin edges lift.
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.01, 100);
+// far enough back that the near corner of the 1 x 1 plane stays in frame
+const HOME = new THREE.Vector3(1.35, 1.25, 1.9);
+camera.position.copy(HOME);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;   // never go under the slab
+
+// the hint promises it, so wire it up: back to where the view started
+renderer.domElement.addEventListener('dblclick', () => {
+  camera.position.copy(HOME);
+  controls.target.set(0, 0, 0);
+  controls.update();
+});
+
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+const fill = new THREE.HemisphereLight(0xc8d4de, 0x14161a, 0.3);
+scene.add(key, fill);
+
+// translucent white, like alabaster: light carries a little way into the
+// material before it comes back out, so thin edges glow and deep folds stay
+// dense. Transmission needs MeshPhysicalMaterial -- plain opacity only fades
+// the surface and loses that depth.
+const material = new THREE.MeshPhysicalMaterial({
+  color: 0xffffff,
+  roughness: 0.45,
+  metalness: 0.0,
+  transmission: 0.3,
+  thickness: 0.35,
+  ior: 1.45,
+  // the room lights every face evenly, which is exactly what flattens a shallow
+  // relief -- hold it back so the key light's shadows carry the form again
+  envMapIntensity: 0.55,
+  side: THREE.DoubleSide,
+});
+
+let mesh = null;
+let height = null;       // { data: Float32Array, w, h } sampled from the PNG
+
+// --- colour -----------------------------------------------------------------
+//
+// The same mosaic written as RGB: the specimen crops, or one flat colour per
+// autoencoder cluster. 06_b_tile_mosaic.py / 06_b_field_wall.py write them on
+// the identical grid, so the texture lands square on the displaced plane.
+//
+// Alabaster carries light through itself, which is exactly what would wash a
+// stain out, so the translucency comes off whenever a map goes on.
+const ALABASTER = { transmission: 0.3, roughness: 0.45, envMapIntensity: 0.55 };
+const PAINTED = { transmission: 0.0, roughness: 0.65, envMapIntensity: 0.4 };
+const loader = new THREE.TextureLoader();
+
+function loadTexture(url) {
+  return new Promise((resolve, reject) => loader.load(url, resolve, undefined, reject));
+}
+
+async function surface(name) {
+  const suffix = $('surface').value;
+  if (material.map) { material.map.dispose(); material.map = null; }
+  // the exposure is wound up for a white translucent slab; left there it washes
+  // the stains out, so a painted surface gets the stop back
+  renderer.toneMappingExposure = suffix ? 1.0 : 1.35;
+  if (!suffix) {
+    Object.assign(material, ALABASTER, { color: new THREE.Color(0xffffff) });
+    material.needsUpdate = true;
+    return;
+  }
+  const url = BASE + name.replace('_preview.png', suffix);
+  try {
+    const texture = await loadTexture(url);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.flipY = true;                 // PlaneGeometry's v runs the other way
+    material.map = texture;
+    Object.assign(material, PAINTED, { color: new THREE.Color(0xffffff) });
+  } catch (e) {
+    // the height map predates the colour maps -- re-run the script for it
+    Object.assign(material, ALABASTER);
+    status('no ' + suffix.slice(1, -4) + ' map for this one yet');
+  }
+  material.needsUpdate = true;
+}
+
+// --- height field -----------------------------------------------------------
+
+async function loadHeight(name) {
+  status('loading ' + name + '…');
+  const image = new Image();
+  image.src = BASE + name;
+  await image.decode();
+
+  // same origin (the static server), so the canvas is not tainted and
+  // getImageData works -- this is why the page is served instead of opened
+  // straight off the disk
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0);
+  const { data, width, height: h } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  const grey = new Float32Array(width * h);
+  for (let i = 0; i < grey.length; i++) grey[i] = data[i * 4] / 255;
+  height = { data: grey, w: width, h };
+  status(`${name.split('/').pop().replace(/_preview\.png$/, '')} · ${width}×${h} px`);
+}
+
+/** Box blur an n x n grid, `passes` times.
+ *
+ *  Deliberately run after the downsample, not before: a 3x3 kernel on the
+ *  3000 px mosaic reaches nine pixels and does nothing visible, while on the
+ *  mesh grid one pass is one vertex and the tile seams actually soften. */
+function blurGrid(grid, n, passes) {
+  let src = grid;
+  for (let p = 0; p < passes; p++) {
+    const out = new Float32Array(src.length);
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        let sum = 0, count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= n || ny >= n) continue;
+            sum += src[ny * n + nx]; count++;
+          }
+        }
+        out[y * n + x] = sum / count;
+      }
+    }
+    src = out;
+  }
+  return src;
+}
+
+/** Box-average the field down to n x n.
+ *
+ *  The mosaic is ~3000 px and the mesh is a few hundred vertices across, so
+ *  reading one pixel per vertex aliases the fine grain into spikes. Averaging
+ *  every pixel that falls inside a vertex's own cell is what a mipmap does,
+ *  and it turns the same data back into terrain. */
+function downsample(field, n) {
+  const { w, h } = height;
+  const out = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) {
+    const y0 = Math.floor(j * h / n), y1 = Math.max(y0 + 1, Math.floor((j + 1) * h / n));
+    for (let i = 0; i < n; i++) {
+      const x0 = Math.floor(i * w / n), x1 = Math.max(x0 + 1, Math.floor((i + 1) * w / n));
+      let sum = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) sum += field[y * w + x];
+      }
+      out[j * n + i] = sum / ((y1 - y0) * (x1 - x0));
+    }
+  }
+  return out;
+}
+
+/** Rebuild the plane: vertices are displaced on the cpu so the normals -- and
+ *  therefore the shading -- follow the real surface. A displacementMap would
+ *  move the vertices on the gpu but leave the normals flat. */
+function build() {
+  const segments = Number($('res').value);
+  const amount = Number($('exag').value);
+
+  const n = segments + 1;                         // one vertex per cell edge
+  const raw = downsample(height.data, n);
+  const grid = blurGrid(raw, n, Number($('blur').value));
+  const thickness = Number($('thick').value);
+
+  // The void around the wall is exactly 0 in the height field, so anything
+  // above it is slab. Lifting the slab as a whole is what gives the piece its
+  // body: raising `amount` instead only deepens the grain -- and the steps
+  // between tiles with it, which is what turns the relief into spikes.
+  const geometry = new THREE.PlaneGeometry(1, 1, segments, segments);
+  geometry.rotateX(-Math.PI / 2);                 // lay it down, y is up
+  const position = geometry.attributes.position;
+  for (let i = 0; i < position.count; i++) {
+    const solid = raw[i] > 0.01;                  // PlaneGeometry is row-major, same order
+    position.setY(i, solid ? thickness + grid[i] * amount : 0);
+  }
+  geometry.computeVertexNormals();
+
+  if (mesh) { mesh.geometry.dispose(); scene.remove(mesh); }
+  mesh = new THREE.Mesh(geometry, material);
+  scene.add(mesh);
+}
+
+function relight() {
+  const az = THREE.MathUtils.degToRad(Number($('az').value));
+  const el = THREE.MathUtils.degToRad(Number($('el').value));
+  key.position.set(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az))
+     .multiplyScalar(4);
+}
+
+// --- controls ---------------------------------------------------------------
+
+const select = $('file');
+for (const [value, label] of FILES) select.add(new Option(label, value));
+
+async function reload() {
+  try {
+    await loadHeight(select.value);
+    await surface(select.value);
+    build();
+  } catch (e) {
+    status('could not load ' + select.value + ' — run 06_b_tile_mosaic.py for it');
+  }
+}
+
+select.addEventListener('change', reload);
+$('surface').addEventListener('change', () => surface(select.value));
+
+const live = { exag: (v) => v, thick: (v) => v, res: (v) => v, blur: (v) => v };
+for (const id of Object.keys(live)) {
+  $(id).addEventListener('input', () => {
+    $(id + '-out').textContent = live[id]($(id).value);
+    build();
+  });
+}
+for (const id of ['az', 'el']) {
+  $(id).addEventListener('input', () => {
+    $(id + '-out').textContent = $(id).value + '°';
+    relight();
+  });
+}
+$('wire').addEventListener('change', (e) => { material.wireframe = e.target.checked; });
+$('spin').addEventListener('change', (e) => { controls.autoRotate = e.target.checked; });
+controls.autoRotateSpeed = 0.6;
+
+$('shot').addEventListener('click', () => {
+  renderer.render(scene, camera);           // make sure the buffer holds this frame
+  const a = document.createElement('a');
+  const tag = $('surface').value ? $('surface').value.replace('.png', '') : '';
+  a.download = select.value.replace('_preview.png', tag + '_3d.png');
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.click();
+});
+
+// A set of fixed viewpoints, each saved as its own PNG. Dragging to an angle
+// cannot be repeated, so a sheet of views built that way never matches the one
+// before it; these are given as azimuth, elevation and distance and come out
+// the same every run.
+window.saveAngles = async (views) => {
+  const done = [];
+  for (const [name, az, el, dist, at = [0, 0, 0]] of views) {
+    // `at` is what the camera looks at. A close-up needs it as much as it
+    // needs a short distance: pulling in while still aimed at the centre only
+    // crops to the middle of the wall, wherever the detail actually is.
+    const a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
+    camera.position.set(at[0] + dist * Math.cos(e) * Math.sin(a),
+                        at[1] + dist * Math.sin(e),
+                        at[2] + dist * Math.cos(e) * Math.cos(a));
+    controls.target.set(at[0], at[1], at[2]);
+    controls.update();
+    renderer.render(scene, camera);
+    // posted back to the server rather than downloaded: a browser quietly
+    // drops a run of download links, and they would land outside the project
+    const blob = await new Promise((r) => renderer.domElement.toBlob(r, 'image/png'));
+    const stem = select.value.split('/').pop().replace('_preview.png', '');
+    await fetch(`/capture?name=${stem}__${name}`, { method: 'POST', body: blob });
+    done.push(name);
+  }
+  return done.join(' ');
+};
+
+/** A hook for driving the view from the console or a script: set the camera to
+ *  an azimuth and elevation around the piece and hand back the frame, so a
+ *  turntable can be rendered without dragging the mouse for every shot.
+ *
+ *      await relief.frame({ az: 40, el: 25, dist: 2.2 })   -> a data URL */
+window.relief = {
+  camera, controls, renderer, scene, material, select, build,
+  setSurface: surface,
+  frame({ az = 45, el = 30, dist = 2.6 } = {}) {
+    const a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
+    camera.position.set(Math.cos(e) * Math.sin(a), Math.sin(e), Math.cos(e) * Math.cos(a))
+          .multiplyScalar(dist);
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    renderer.render(scene, camera);
+    return renderer.domElement.toDataURL('image/png');
+  },
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// --- go ---------------------------------------------------------------------
+
+relight();
+await reload();
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

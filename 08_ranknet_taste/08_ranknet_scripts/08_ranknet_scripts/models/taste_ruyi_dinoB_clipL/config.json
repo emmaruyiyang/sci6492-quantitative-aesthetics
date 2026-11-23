@@ -1,0 +1,19 @@
+{
+  "model_type": "ranknet",
+  "version": "1.0",
+  "model_ids": [
+    "dino~dinov2_vitb14",
+    "clip~ViT-L-14~datacomp_xl_s13b_b90k"
+  ],
+  "normalize": [
+    true,
+    true
+  ],
+  "embed_dim": 1536,
+  "hidden_dim": 128,
+  "dropout": 0.3,
+  "trained_on": {
+    "dataset": "art_abstract_200",
+    "ranking": "ranking_ruyi.json"
+  }
+}

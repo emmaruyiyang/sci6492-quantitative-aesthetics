@@ -1,0 +1,21 @@
+/* Image Remap: the Tile Map's styles (tiles.css) and these */
+
+/* result | destination over source */
+.stage.remap { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); --view-max: calc(100vh - 170px); }
+.side-views { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.view.small { width: 100%; max-width: calc(50vh - 120px); min-width: 160px; cursor: default; }
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#hover-info { margin: 6px 0 0; min-height: 1.45em; overflow-wrap: anywhere; }
+@media (max-width: 1200px) {
+  .view.small { max-width: none; }
+}
+
+/* the two images side by side */
+.drop-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.drop-pair figure { margin: 0; min-width: 0; }
+.drop-pair .dropzone { height: 110px; margin: 0 0 2px; }
+#swap { margin: 8px 0 6px; }
+
+.side label.pick input[type="number"] { width: 80px; }
+#compute { margin-top: 10px; }
+.rescan { margin: 12px 0 0; }

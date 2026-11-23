@@ -1,0 +1,167 @@
+/* Segmentation Explorer: the Tile Map's styles (tiles.css) and these */
+
+/* The page fills the window: the sidebar scrolls on its own, the sections of
+   the stage share its height, each scrolling inside if it has to.
+     image:     view | here 80%, maps 20%
+     3D model:  frames 5%, view | here 55%, per frame 25%, maps 15%  */
+body { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+header { flex: none; }
+main { flex: 1; min-height: 0; align-items: stretch; padding-top: 12px; padding-bottom: 12px;
+  grid-template-columns: 318px minmax(0, 1fr); }      /* 300 px of panels and the sidebar's scrollbar */
+.side { min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; scrollbar-width: thin; }
+.stage.segment {
+  position: static; height: 100%; min-height: 0; gap: 10px;
+  grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr);
+  grid-template-rows: minmax(0, 80fr) minmax(90px, 20fr);
+  grid-template-areas: "view here" "maps maps";
+}
+.stage.segment.three {
+  grid-template-rows: minmax(64px, 5fr) minmax(0, 55fr) minmax(0, 25fr) minmax(90px, 15fr);
+  grid-template-areas: "frames frames" "view here" "sweep sweep" "maps maps";
+}
+.stage.segment > .panel { min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 12px; }
+.stage.segment > .panel > h2 { margin: 0 0 6px; flex: none; }
+.stage.segment .view-head { flex: none; min-height: 0; margin-bottom: 6px; }
+.view-panel { grid-area: view; }
+#here { grid-area: here; overflow-y: auto !important; }
+.frames-panel { grid-area: frames; }
+.sweep-panel { grid-area: sweep; }
+.maps-panel { grid-area: maps; }
+
+/* the view: the biggest square that fits */
+.view-box { flex: 1; min-height: 0; container-type: size; display: flex; align-items: center; justify-content: center; }
+.view-box .view { width: min(100cqw, 100cqh); height: min(100cqw, 100cqh); margin: 0; }
+#hover-info { flex: none; }
+
+/* narrow windows: one column, the page scrolls */
+@media (max-width: 1000px) {
+  body { height: auto; display: block; overflow: visible; }
+  .side { overflow: visible; }
+  .stage.segment, .stage.segment.three {
+    height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
+    grid-template-areas: "frames" "view" "here" "sweep" "maps";
+  }
+  .view-box { height: min(90vw, 80vh); flex: none; }
+  .stage.segment .sweep-panel { height: 420px; }
+  .stage.segment .maps-panel { height: 200px; }
+}
+.view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.view.picking { cursor: crosshair; }
+#hover-info { margin: 6px 0 0; min-height: 1.45em; overflow-wrap: anywhere; }
+#result-notes { overflow-wrap: anywhere; text-align: right; }
+
+.side label.pick input[type="number"] { width: 80px; }
+.side label.pick input[type="text"] { width: 170px; }
+label.block { display: block; margin: 0 0 4px; }
+#compute { margin-top: 4px; }
+.rescan { margin: 12px 0 0; }
+#prompts-panel > div { margin-bottom: 12px; }
+
+textarea {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  padding: 4px;
+  resize: vertical;
+}
+#template-row { margin-top: 6px; display: flex; }
+
+/* reference images and points: a list, each with a button to remove it */
+#references { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+#references:empty { display: none; }
+.reference { position: relative; margin: 0; aspect-ratio: 1; background: var(--map-bg); border: 1px solid var(--line); }
+.reference img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.reference .remove, .point .remove {
+  border: none; background: none; padding: 0 4px; line-height: 1.2; font-size: 14px; cursor: pointer;
+}
+.reference .remove { position: absolute; top: 0; right: 0; background: var(--surface); }
+.dropzone.small-drop { height: 40px; margin: 0; font-size: 12px; }
+#points { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 12px; }
+.point { display: flex; align-items: center; justify-content: space-between; color: var(--ink-2); }
+.point .marker {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%; margin-right: 6px;
+  background: var(--ink); color: #ffffff; font-size: 10px; font-weight: 700;
+}
+
+/* values at the hovered point */
+#here-bars .bar-row .swatch { display: inline-block; margin-right: 4px; vertical-align: middle; }
+#here-bars .bar-row .fill.negative { background: #3b6fb6; }
+#here-bars .bar-row .fill.positive { background: #c0392b; }
+#here-bars .winner { font-weight: 700; margin: 0 0 8px; overflow-wrap: anywhere; }
+
+/* every map as a thumbnail, in a strip as high as the section: click to show it */
+#maps { flex: 1; min-width: 0; height: 100%; display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin; }
+.map-card {
+  flex: none; height: 100%; display: flex; flex-direction: column; gap: 2px;
+  padding: 3px; border: 1px solid transparent; background: none; text-align: left;
+  font-size: 12px; color: var(--ink-2); cursor: pointer;
+}
+.map-card:hover { border-color: var(--line); background: none; }
+.map-card.active { border-color: var(--ink); color: var(--ink); }
+.map-card canvas { flex: 1 1 0; min-height: 0; align-self: center; display: block; background: var(--map-bg); }
+.map-card .name, .map-card .range {
+  flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 5px;
+}
+.map-card .range { color: var(--ink-3); font-size: 11px; }
+
+/* image | 3D model */
+.modes { display: flex; gap: 16px; margin-bottom: 10px; }
+#drop-3dm { overflow-wrap: anywhere; }
+#drop-3dm.has-image { color: var(--ink); }
+
+/* the frames, a strip as high as the section, the title beside it: click one to explore it */
+.stage.segment > .frames-panel, .stage.segment > .maps-panel {
+  flex-direction: row; align-items: center; gap: 12px; padding-top: 6px; padding-bottom: 6px;
+}
+.stage.segment > .frames-panel > h2, .stage.segment > .maps-panel > h2 { margin: 0; }
+#frames { flex: 1; min-width: 0; height: 100%; display: flex; gap: 4px; overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin; }
+.frame-thumb {
+  position: relative; flex: none; height: 100%; aspect-ratio: 1; padding: 0;
+  border: 2px solid transparent; background: var(--map-bg);
+}
+.frame-thumb:hover { border-color: var(--line); background: var(--map-bg); }
+.frame-thumb.active { border-color: var(--ink); }
+.frame-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.frame-thumb .label {
+  position: absolute; left: 0; top: 0; padding: 0 3px;
+  background: var(--surface); color: var(--ink-2); font-size: 10px;
+}
+/* the value of the highlighted map in this frame */
+.frame-thumb .bar { position: absolute; right: 0; bottom: 0; width: 6px; opacity: .9; }
+
+/* the graph | its legend and the best frames, both as high as the section */
+.sweep-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 14px; }
+.graph-box { min-height: 0; display: flex; flex-direction: column; }
+.sweep-side { min-height: 0; overflow-y: auto; }
+.sweep-side h2 { margin: 6px 0 4px; }
+
+/* a line per map */
+#graph { display: block; width: 100%; flex: 1 1 0; min-height: 0; cursor: pointer; }
+#graph .grid { stroke: var(--line); stroke-width: 1; }
+#graph .tick { font: 10px var(--font); fill: var(--ink-3); }
+#graph .selected-frame { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+#graph .cursor { stroke: var(--ink-3); stroke-width: 1; }
+#graph .series { fill: none; stroke-width: 1.6; stroke-linejoin: round; transition: opacity .15s; }
+#graph .series.highlight { stroke-width: 3; }
+#graph .series.faded { opacity: .15; }
+#graph .hit { fill: none; stroke: transparent; stroke-width: 10; pointer-events: stroke; }
+#graph-info { flex: none; margin: 2px 0 0; min-height: 1.45em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sweep-panel #legend { margin: 0; }
+
+/* the frames that show each map the most */
+#best { display: grid; grid-template-columns: 1fr; gap: 4px; }
+.best-row { display: grid; grid-template-columns: 1fr repeat(3, 56px); gap: 6px; align-items: center;
+  padding: 3px; border: 1px solid transparent; }
+.best-row.active { border-color: var(--ink); }
+.best-name { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; display: flex; align-items: center; gap: 5px; }
+.best-frame { padding: 0; border: 1px solid var(--line); background: var(--map-bg); font-size: 10px; color: var(--ink-3); }
+.best-frame:hover { background: var(--map-bg); border-color: var(--ink); }
+.best-frame.active { border-color: var(--ink); }
+.best-frame img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }

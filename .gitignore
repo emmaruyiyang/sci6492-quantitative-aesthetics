@@ -1,0 +1,43 @@
+# ---- environments ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+node_modules/
+
+# ---- os / editor ----
+.DS_Store
+.vscode/
+.idea/
+
+# ---- archives (re-zip from the sources instead) ----
+*.zip
+
+# ---- datasets: scraped or downloaded, regenerable by the fetch scripts ----
+05_classifiers/datasets/
+05_classifiers/data/
+06_autoencoders/data/
+08_ranknet_taste/08_ranknet_datasets/
+08_ranknet_taste/zip/
+final_project/sample/
+
+# ---- trained weights ----
+05_classifiers/models/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.kv
+*.kv.vectors.npy
+
+# ---- heavy binaries ----
+*.3dm
+*.docx
+
+# ---- build output ----
+final_project/scaleviz/dist/
+
+# ---- machine-local config (hold absolute paths; *_example.json are the templates) ----
+.env
+env_config.json

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Classifier Map</title>
+  <link rel="stylesheet" href="classifier_web_app.css">
+</head>
+<body>
+  <header>
+    <h1>Classifier Map</h1>
+    <p>Images placed by how strongly a trained classifier scores them for each class.</p>
+  </header>
+
+  <main>
+    <div class="side">
+      <section class="panel">
+        <h2>Model</h2>
+        <div class="toolbar">
+          <select id="model"></select>
+        </div>
+        <p class="status" id="status">loading…</p>
+
+        <h2>Projection</h2>
+        <div class="toolbar column">
+          <label><input id="softmax" type="checkbox" checked> softmax <span class="note">(off: sigmoid)</span></label>
+          <label><input id="biaxial" type="checkbox"> biaxial <span class="note">(off: radial)</span></label>
+          <label class="axis-pick">x axis <select id="x-class" disabled></select></label>
+          <label class="axis-pick">y axis <select id="y-class" disabled></select></label>
+          <label class="slider">thumbnails <input id="thumb-size" type="range" min="24" max="120" value="56"></label>
+        </div>
+        <p class="hint" id="projection-hint"></p>
+
+        <h2>Images</h2>
+        <div class="toolbar">
+          <button id="upload">Add images…</button>
+          <input id="files" type="file" accept="image/*" multiple hidden>
+          <button id="clear-map">Clear map</button>
+        </div>
+        <p class="hint">Or drop image files on the map.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Drawing</h2>
+        <canvas id="canvas" width="256" height="256"></canvas>
+        <div class="toolbar brush">
+          <label>color <input id="brush-color" type="color" value="#000000"></label>
+          <label class="slider">size <input id="brush-size" type="range" min="2" max="60" value="12"></label>
+        </div>
+        <div class="toolbar">
+          <button id="embed" class="primary">Embed</button>
+          <button id="clear-canvas">Clear</button>
+        </div>
+        <p class="hint">The drawing (red frame on the map) is classified every time you release the mouse. Embed adds a copy to the map.</p>
+      </section>
+
+      <section class="panel info" id="info">
+        <h2>Scores</h2>
+        <p class="hint" id="info-empty">Hover an image on the map.</p>
+        <div id="info-body" hidden>
+          <img id="info-image" alt="">
+          <div id="info-name"></div>
+          <div id="info-bars"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel map-panel">
+      <div id="map">
+        <svg id="axes" viewBox="0 0 1000 1000"></svg>
+        <div id="items"></div>
+        <div id="drop-hint">drop images here</div>
+      </div>
+    </section>
+  </main>
+
+  <script src="classifier_web_app.js"></script>
+</body>
+</html>

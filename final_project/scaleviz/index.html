@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>scaleviz P0</title>
+    <style>
+      html, body { margin:0; height:100%; background:#05060a; overflow:hidden; }
+      canvas { display:block; }
+      #hud {
+        position:fixed; left:12px; top:12px; z-index:10;
+        font:11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color:#9fb3c8; background:rgba(5,6,10,.55);
+        border:1px solid rgba(159,179,200,.18); border-radius:6px;
+        padding:8px 10px; white-space:pre; pointer-events:none;
+        backdrop-filter: blur(6px);
+      }
+      #hud b { color:#e6edf3; font-weight:600; }
+
+      /* The scale bar is also the zoom control: it reads out where you are
+         and it is the one place you can grab the whole range at once. */
+      #scalebar {
+        --w: 260px;
+        position:fixed; left:12px; bottom:12px; z-index:10;
+        font:11px ui-monospace, Menlo, monospace; color:#9fb3c8;
+        width:var(--w); user-select:none; touch-action:none;
+      }
+      #scalebar .row { display:flex; justify-content:space-between; align-items:baseline; }
+      #scalebar .row #sbLabel { color:#e6edf3; }
+      #scalebar .row #sbU { opacity:.55; }
+      /* The visible bar is 3px; the grab target is 20px. */
+      #scalebar .hit {
+        position:relative; height:20px; margin-top:2px; cursor:ew-resize;
+        outline:none;
+      }
+      #scalebar .track {
+        position:absolute; left:0; right:0; top:50%; height:3px; margin-top:-1.5px;
+        background:rgba(159,179,200,.18); border-radius:2px;
+      }
+      #scalebar .fill { position:absolute; inset:0 auto 0 0; background:#6ea8c7; border-radius:2px; }
+      #scalebar .thumb {
+        position:absolute; top:50%; width:11px; height:11px; margin:-5.5px 0 0 -5.5px;
+        border-radius:50%; background:#cfe3ef; border:1px solid rgba(5,6,10,.7);
+        box-shadow:0 0 0 3px rgba(110,168,199,.18);
+        transition:box-shadow .12s, background .12s;
+      }
+      #scalebar .hit:hover .thumb,
+      #scalebar .hit:focus-visible .thumb,
+      #scalebar.dragging .thumb { background:#fff; box-shadow:0 0 0 5px rgba(110,168,199,.3); }
+      /* Ticks sit at the zoom where each level's cross-fade actually peaks,
+         not at even thirds: the bar would otherwise lie about the hierarchy. */
+      #scalebar .ticks { position:relative; height:14px; margin-top:3px; }
+      #scalebar .tick {
+        position:absolute; top:0; transform:translateX(-50%);
+        background:none; border:0; padding:0 2px; cursor:pointer;
+        font:inherit; color:#9fb3c8; opacity:.55; white-space:nowrap;
+      }
+      #scalebar .tick:hover { opacity:1; color:#e6edf3; }
+      #scalebar .tick::before {
+        content:''; position:absolute; left:50%; top:-5px; width:1px; height:3px;
+        background:rgba(159,179,200,.45);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <div id="scalebar">
+      <div class="row"><span id="sbLabel">cell</span><span id="sbU"></span></div>
+      <div class="hit" id="sbHit" tabindex="0" role="slider"
+           aria-label="scale" aria-valuemin="-0.3" aria-valuemax="3.65">
+        <div class="track"><div class="fill" id="sbFill"></div></div>
+        <div class="thumb" id="sbThumb"></div>
+      </div>
+      <div class="ticks" id="sbTicks"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
